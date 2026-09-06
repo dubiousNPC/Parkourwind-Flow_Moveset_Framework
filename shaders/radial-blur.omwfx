@@ -1,0 +1,75 @@
+uniform_int uSamples {
+    default = 10;
+    step = 1;
+    min = 4;
+    max = 32;
+    display_name = "Blur Samples";
+    header = "Blur";
+}
+
+uniform_float uStart {
+    default = 1.0;
+    min = 0.0;
+    step = 0.01;
+    description = "Start zoom for the blur, you can lower this to remove artifacts at the sides of the screen but it also zooms in a bit";
+    display_name = "Blur Start";
+}
+
+uniform_float uRadius {
+    default = 0.05;
+    step = 0.001;
+    min = 0.0;
+    display_name = "Blur Radius";
+    description = "Blur strength essentially";
+    static = false;
+}
+
+uniform_bool uMask {
+    default = true;
+    description = "Use a Dist mask to hide the blur at the center of the screen so you can see";
+    display_name = "Mask Blur";
+    header = "Mask";
+}
+
+uniform_float uMaskPow {
+    default = 7.5;
+    min = 0.0;
+    step = 0.1;
+    description = "Higher = smaller, lower = larger";
+    display_name = "Mask Power";
+}
+
+shared {
+
+}
+
+fragment main {
+	omw_In vec2 omw_TexCoord;
+	void main()
+	{
+		vec4 scene = omw_GetLastShader(omw_TexCoord);
+        vec2 dist = omw_TexCoord - vec2(0.5);
+        vec4 col = vec4(0.0);
+        float pre = uRadius * (1.0 / float(uSamples - 1.0));
+        for(int i = 0; i < uSamples; i++) {
+            float scale = uStart + (float(i)* pre);
+            col += omw_GetLastShader(dist * scale + vec2(0.5));
+        }
+        col /= uSamples;
+        if (uMask) {
+            float mask = pow(1.0 - length(dist), uMaskPow);
+            omw_FragColor = mix(col, scene, mask);
+        }
+        else {
+            omw_FragColor = col;
+        }
+	}
+}
+
+technique {
+    description = "Radial blur, gotta go fast";
+    passes = main;
+    version = "1.0";
+    author = "Epoch";
+    dynamic = true;
+}

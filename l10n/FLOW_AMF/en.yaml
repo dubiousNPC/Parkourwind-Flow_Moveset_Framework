@@ -1,0 +1,8 @@
+
+name: "FLOW AMF"
+description: |
+  Advanced Movement Framework
+
+SettingsFLOW_AMF: "Movement Settings"
+modSettingsTitle: "FLOW Configuration"
+modSettingsDesc: "Configure movement mechanics."
