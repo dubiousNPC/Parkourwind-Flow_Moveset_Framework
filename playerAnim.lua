@@ -71,13 +71,13 @@ local GROUPS = {
     -- List form: interchangeable clips for the same action. These are VISUAL
     -- variation only - none carries root motion - so which one plays cannot
     -- affect movement, and resolveGroup picks at random per entry.
-    Vault     = { group = { "pwvault1", "pwvault2", "pwvault3" }, speed = 1 },
-    Mantle    = { group = { "pwmantle1", "pwmantle2", "pwmantle3" }, speed = 1,
-        priority = PRIORITY_FLOW,
+    Vault     = { group = { "pwvault1", "pwvault2", "pwvault3" }, speed = .8 },
+    Mantle    = { group = { "pwmantle1", "pwmantle2", "pwmantle3" }, speed = .7,
+        priority = PRIORITY_FLOW_MAJOR,
         blendMask = animation.BLEND_MASK.All,
         autoDisable = true},
     LedgeHang = {
-        group = "pwwallhangidle", speed = 1,  -- looping hang pose
+        group = "pwwallhangidle", speed = .7,  -- looping hang pose
         priority = PRIORITY_FLOW_MAJOR,
         blendMask = animation.BLEND_MASK.All,
     },
