@@ -68,9 +68,12 @@ local PRIORITY_FLOW       = animation.PRIORITY.Weapon
 local PRIORITY_FLOW_MAJOR = animation.PRIORITY.Block
 
 local GROUPS = {
-    Vault     = { group = "pwvault1",       speed = 1 },  -- one-shot, plays over the vault's physics duration
+    -- List form: interchangeable clips for the same action. These are VISUAL
+    -- variation only - none carries root motion - so which one plays cannot
+    -- affect movement, and resolveGroup picks at random per entry.
+    Vault     = { group = { "pwvault1", "pwvault2", "pwvault3" }, speed = 1 },
     Mantle    = {
-        group = "pwmantle1", speed = 1,  -- kf has pwmantle1/2/3; "pwmantle" does not exist
+        group = { "pwmantle1", "pwmantle2", "pwmantle3" }, speed = 1,
         priority = PRIORITY_FLOW,
         blendMask = animation.BLEND_MASK.All,
         autoDisable = false,  -- hold the last frame instead of reverting mid-climb if
@@ -184,6 +187,15 @@ local function resolveGroup(entry)
     if entry.variants then
         return entry.variants[pendingVariant or "right"]
     end
+
+    -- List form: pick one at random. Restored after a merge dropped it - the
+    -- symptom was that only the first clip ever played, because `group` was
+    -- reverted to a plain string and there was nothing to choose between.
+    if type(entry.group) == "table" then
+        local n = #entry.group
+        if n == 0 then return nil end
+        return entry.group[math.random(n)]
+    end
     return entry.group
 end
 
@@ -220,6 +232,10 @@ function Anim.verifyGroups()
             if entry.variants then
                 for dir, g in pairs(entry.variants) do
                     probes[#probes + 1] = { stateName .. "/" .. dir, g }
+                end
+            elseif type(entry.group) == "table" then
+                for i = 1, #entry.group do
+                    probes[#probes + 1] = { stateName .. "[" .. i .. "]", entry.group[i] }
                 end
             elseif entry.group then
                 probes[#probes + 1] = { stateName, entry.group }

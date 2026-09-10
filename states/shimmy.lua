@@ -168,6 +168,7 @@ end
 local timeInState = 0
 local dir = 0
 local startPos = nil
+local stepSnapped = false
 local endPos = nil
 local wallNormal = nil
 
@@ -234,6 +235,7 @@ function ShimmyState:enter(syncData)
     -- match; assuming they did made one direction drift out of sync with its
     -- animation and judder. Falls back to the constant if the keys are absent.
 
+    stepSnapped = false
     startPos = mwSelf.position
     local lateral = ShimmyState.lateralVector(wallNormal)
     endPos = lateral and (startPos + lateral * (STEP_DISTANCE * dir)) or startPos
@@ -275,15 +277,32 @@ function ShimmyState:update(dt, syncData, inputData)
         return "LedgeHang"
     end
 
+    -- [FIX] ONE teleport per step, not one per tick.
+    --
+    -- The lerp above sent FLOW_SnapTo every frame, so the backend called
+    -- actor:teleport() ~60 times a second. A teleport discards the camera's
+    -- interpolation from the previous frame, so re-issuing one every frame
+    -- means the camera is permanently re-seating itself - that is the
+    -- vibration, and it is a property of the transport rather than of the
+    -- timing. It survived the .kf realignment for exactly that reason: the
+    -- animation and the movement can be in perfect agreement and the camera
+    -- will still shake.
+    --
+    -- LedgeHang moves the same way and has never vibrated, because it snaps
+    -- once on entry and then holds. Shimmy now does the same: a single 30-unit
+    -- snap at the start of the step, with the clip playing out the visual over
+    -- STEP_DURATION. 30 units is small enough that the jump reads as part of
+    -- the animation rather than a lurch.
+    if not stepSnapped then
+        stepSnapped = true
+        core.sendGlobalEvent('FLOW_SnapTo', {
+            actor = mwSelf,
+            position = endPos,
+            rotation = mwSelf.rotation,
+        })
+    end
+
     local t = math.min(1.0, timeInState / STEP_DURATION)
-    local pos = startPos + (endPos - startPos) * t
-
-    core.sendGlobalEvent('FLOW_SnapTo', {
-        actor = mwSelf,
-        position = pos,
-        rotation = mwSelf.rotation,
-    })
-
     if t >= 1.0 then
         -- Back to the hang. Holding the direction re-enters immediately for
         -- another step, which is what makes a held key feel continuous.

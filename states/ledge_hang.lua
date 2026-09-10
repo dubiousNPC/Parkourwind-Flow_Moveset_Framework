@@ -19,6 +19,7 @@ local camera = require('openmw.camera')
 local Sensor = require('core/sensor')
 local SensorExt = require('core/optional/sensor_ext')
 local ShimmyState = require('states/shimmy')
+local MantleState = require('states/mantle')
 
 local LedgeHangState = BaseState.new("LedgeHang")
 
@@ -208,6 +209,12 @@ function LedgeHangState:update(dt, syncData, inputData)
         -- This ensures Mantle receives the valid ledge position even if the sensor missed this frame.
         Sensor.data.interaction = "Mantle"
         Sensor.data.targetPos = cachedTargetPos  -- core Sensor, so mantle.lua picks it up
+
+        -- This ledge was validated when it was grabbed and the player has been
+        -- hanging from it since. Mantle's destination probes are stricter than
+        -- the grab test and were refusing climbs out of perfectly good hangs,
+        -- which is what made the jump-from-hang do nothing.
+        MantleState.vouchDestination()
 
         return "Mantle"
     end

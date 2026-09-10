@@ -58,6 +58,20 @@ end
 
 -- State Interface
 
+-- Set by states/ledge_hang.lua before it hands over. A climb out of a hang has
+-- ALREADY had its ledge validated - SensorExt found the lip, the grab snapped
+-- to it, and the player has been hanging from it. Re-running the destination
+-- probes there is not a second opinion, it is a different and stricter test on
+-- geometry that is known good: targetPos sits LEDGE_PUSH_IN past the edge and
+-- LANDING_BUFFER above it, so a low ceiling or a narrow top refuses a climb the
+-- player can plainly see is possible. That refusal is why jumping from a hang
+-- did nothing.
+local destinationVouched = false
+
+function MantleState.vouchDestination()
+    destinationVouched = true
+end
+
 function MantleState:enter(syncData)
     -- Cleared first: state_manager reads this immediately after enter() to
     -- decide whether to announce and animate, so a stale true from a previous
@@ -137,6 +151,11 @@ function MantleState:enter(syncData)
         collisionType = nearby.COLLISION_TYPE.World + nearby.COLLISION_TYPE.HeightMap
     }
 
+    -- Skip the destination probes when the caller has vouched for the ledge.
+    if destinationVouched then
+        destinationVouched = false
+    else
+
     local destTop = targetPos + util.vector3(0, 0, DEST_HEAD_PROBE)
     local floorRes = nearby.castRay(destTop, targetPos - util.vector3(0, 0, DEST_FLOOR_PROBE),
                                     DEST_RAY_OPTS)
@@ -154,6 +173,8 @@ function MantleState:enter(syncData)
         self.abort = true
         return
     end
+
+    end  -- destinationVouched
 
     local heightDiff = math.abs(targetPos.z - startPos.z)
     totalDuration = math.max(MIN_DURATION, heightDiff / CLIMB_SPEED_UNITS_PER_SEC)
