@@ -40,19 +40,21 @@ local ShimmyState = BaseState.new("Shimmy")
 -- CONFIGURATION
 -- ==============================================
 local STEP_DISTANCE = 30.0   -- units per step, roughly a hitbox width
--- Seconds per step. Matches the clip length in xParkourwind1.kf, which is now
--- authored so both directions share the same timing.
---
--- [REVERTED] A previous version measured this per direction at runtime via
--- animation.getTextKeyTime, to compensate for pwshimmyl1 and pwshimmyr1 being
--- different lengths. The real fault was a misalignment in the .kf and it has
--- been fixed at source; querying the track per step reintroduced severe screen
--- judder, because the duration could shift between consecutive steps and the
--- lerp restarted against a different denominator each time.
---
--- Read the timing from the asset once, at authoring time, and keep it a
--- constant here. If the clips are ever re-timed, change this number.
-local STEP_DURATION = 1.0
+-- NOTE: a fixed STEP_DURATION used to drive the step as a lerp. The step now
+-- ends on DISTANCE TRAVELLED because the engine sets the speed, so there is no
+-- fixed duration to match against the clip. The animation and the movement are
+-- decoupled by design: the clip plays once per step, the engine carries the
+-- body, and neither waits on the other.
+
+-- Lateral control magnitude (-1..1) written to self.controls.sideMovement.
+-- The engine scales this by the actor's own movement speed, so the step
+-- duration is emergent rather than fixed - which is why the step now ends on
+-- distance travelled rather than on a fixed duration.
+local SIDE_DRIVE = 1.0
+
+-- Ceiling on a single step. Only reached if the strafe is blocked; a normal
+-- step finishes on distance well before this.
+local STEP_TIMEOUT = 2.0
 
 -- Validation probes for the destination. Without these a shimmy walks the
 -- player off the end of a ledge into thin air, or through a corner.
@@ -168,7 +170,6 @@ end
 local timeInState = 0
 local dir = 0
 local startPos = nil
-local stepSnapped = false
 local endPos = nil
 local wallNormal = nil
 
@@ -235,7 +236,6 @@ function ShimmyState:enter(syncData)
     -- match; assuming they did made one direction drift out of sync with its
     -- animation and judder. Falls back to the constant if the keys are absent.
 
-    stepSnapped = false
     startPos = mwSelf.position
     local lateral = ShimmyState.lateralVector(wallNormal)
     endPos = lateral and (startPos + lateral * (STEP_DISTANCE * dir)) or startPos
@@ -252,6 +252,10 @@ function ShimmyState:enter(syncData)
 end
 
 function ShimmyState:exit()
+    -- Release the lateral drive explicitly. applySuspension(false) hands the
+    -- controls back to the engine, but whatever this state last wrote to
+    -- sideMovement would otherwise be the value it hands back.
+    mwSelf.controls.sideMovement = 0
     applySuspension(false)
     startPos = nil
     endPos = nil
@@ -261,9 +265,18 @@ end
 function ShimmyState:update(dt, syncData, inputData)
     timeInState = timeInState + dt
 
-    -- WallBoost: back + jump while shimmying. Checked before the step
-    -- completes so it can be fired mid-move, which is the point of it.
-    if inputData.jump and inputData.moveVector.y < 0 then
+    -- WallBoost: JUMP ALONE while shimmying.
+    --
+    -- [RESTORED] This required `jump AND moveVector.y < 0` (back). That
+    -- combination is not merely awkward, it is close to unreachable: holding a
+    -- lateral key is what keeps you IN this state, and adding back means
+    -- either fighting that input or ending the step before jump is read. The
+    -- gesture could effectively never fire.
+    --
+    -- No direction input is needed anyway - the shimmy already knows which way
+    -- the player is travelling, so `dir` picks the animation variant and the
+    -- wall normal supplies the push. Restored after a merge reverted it.
+    if inputData.jump then
         WallBoostState.setLaunch(wallNormal, dir)
         return "WallBoost"
     end
@@ -277,35 +290,44 @@ function ShimmyState:update(dt, syncData, inputData)
         return "LedgeHang"
     end
 
-    -- [FIX] ONE teleport per step, not one per tick.
+    -- MOVEMENT: engine-driven strafe, not a teleport.
     --
-    -- The lerp above sent FLOW_SnapTo every frame, so the backend called
-    -- actor:teleport() ~60 times a second. A teleport discards the camera's
-    -- interpolation from the previous frame, so re-issuing one every frame
-    -- means the camera is permanently re-seating itself - that is the
-    -- vibration, and it is a property of the transport rather than of the
-    -- timing. It survived the .kf realignment for exactly that reason: the
-    -- animation and the movement can be in perfect agreement and the camera
-    -- will still shake.
+    -- Two transports were tried and both were wrong in opposite directions:
+    --   * FLOW_SnapTo every frame -> actor:teleport() ~60x/sec. A teleport
+    --     discards the camera's interpolation, so re-issuing one every frame
+    --     left the camera permanently re-seating itself. That was the
+    --     vibration, and it was a property of the transport, which is why the
+    --     .kf realignment did not touch it.
+    --   * One snap per step -> no vibration, but the player arrives instantly
+    --     and then waits out the clip. That is the point-to-point teleporting.
     --
-    -- LedgeHang moves the same way and has never vibrated, because it snaps
-    -- once on entry and then holds. Shimmy now does the same: a single 30-unit
-    -- snap at the start of the step, with the clip playing out the visual over
-    -- STEP_DURATION. 30 units is small enough that the jump reads as part of
-    -- the animation rather than a lurch.
-    if not stepSnapped then
-        stepSnapped = true
-        core.sendGlobalEvent('FLOW_SnapTo', {
-            actor = mwSelf,
-            position = endPos,
-            rotation = mwSelf.rotation,
-        })
-    end
+    -- There is no teleport-based rate that is both smooth and non-jittery,
+    -- because the problem is the teleport itself. So: don't teleport.
+    --
+    -- The hang already holds I.Controls.overrideMovementControls(true), which
+    -- means THIS SCRIPT owns self.controls - writing to them is what the
+    -- override is for. Gravity is suspended by the Levitate effect, so a
+    -- lateral control input makes the engine strafe the player along the wall
+    -- under its own interpolation: continuous, camera-stable, and free.
+    mwSelf.controls.sideMovement = dir * SIDE_DRIVE
+    mwSelf.controls.movement = 0
+    mwSelf.controls.jump = false
 
-    local t = math.min(1.0, timeInState / STEP_DURATION)
-    if t >= 1.0 then
-        -- Back to the hang. Holding the direction re-enters immediately for
-        -- another step, which is what makes a held key feel continuous.
+    -- The step ends on DISTANCE travelled, not on a timer, because the engine
+    -- decides the speed. The timer survives only as a ceiling so a blocked
+    -- strafe cannot hang the state forever.
+    local travelled = (mwSelf.position - startPos):length()
+    if travelled >= STEP_DISTANCE or timeInState >= STEP_TIMEOUT then
+        -- Corrective snap ONLY if the engine could not deliver - e.g. the
+        -- strafe was blocked. Small and rare; the backend's MAX_SNAP_DISTANCE
+        -- guard still applies.
+        if travelled < STEP_DISTANCE * 0.5 and endPos then
+            core.sendGlobalEvent('FLOW_SnapTo', {
+                actor = mwSelf,
+                position = endPos,
+                rotation = mwSelf.rotation,
+            })
+        end
         return "LedgeHang"
     end
 
