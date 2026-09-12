@@ -148,6 +148,19 @@ function Sensor.registerSharedRay()
         print("[FLOW:Sensor] I.SharedRay not found - make sure SharedRay is bundled and registered in the omwscripts file.")
         return
     end
+
+    -- Same shape hazard as the accessor in update(): the interface existing
+    -- says nothing about which copy won or what it exposes. Report once and
+    -- carry on - a missing requestDistance costs reach, not correctness,
+    -- because update() re-checks every hit against dynamicReach anyway.
+    if not I.SharedRay.requestDistance then
+        print("[FLOW:Sensor] The SharedRay copy that claimed the interface has no " ..
+              "requestDistance (version " .. tostring(I.SharedRay.version) ..
+              "). Another mod's build won the registration; FLOW will use whatever " ..
+              "distance it casts at.")
+        return
+    end
+
     I.SharedRay.requestDistance(Sensor.MAX_REACH)
 end
 
@@ -168,15 +181,49 @@ function Sensor.update(dt, inputIntents, syncData)
     local wallPos, wallNormal, wallDist, source
 
     -- Primary: SharedRay (camera-aimed, free/shared)
-    if I.SharedRay then
+    --
+    -- [COMPAT] Resolve the ACCESSOR, not just the interface. A version number
+    -- guards against an OLDER copy winning; it does NOT describe the interface
+    -- SHAPE. Several mods bundle a file called sharedray_v2 and each declares
+    -- MY_VERSION = 2, so whichever loads FIRST claims the interface and every
+    -- later copy - including FLOW's - sees `version >= MY_VERSION` and bails.
+    -- If the winner is a v2 without getUnclipped, `if I.SharedRay then` passes
+    -- and the call is nil:
+    --     core/sensor.lua:174: attempt to call field 'getUnclipped' (a nil value)
+    -- thrown inside onUpdate, so it took the whole tick down every frame.
+    --
+    -- FLOW cannot control which copy wins, so it asks for what it needs and
+    -- degrades to the knee-height scan below when the answer is no.
+    local rayGet = I.SharedRay and (I.SharedRay.getUnclipped or I.SharedRay.get)
+    if rayGet then
         -- SharedRay results are a live view owned by SharedRay - read what
         -- we need immediately, never hold onto the table itself.
-        local ray = I.SharedRay.getUnclipped()
-        if ray.hit and ray.hitPos and ray.hitNormal
-           and ray.distance <= dynamicReach
+        local ray = rayGet()
+        if ray and ray.hit and ray.hitPos and ray.hitNormal
            and ray.hitNormal.z < Sensor.WALKABLE_SLOPE_Z then
-            wallPos, wallNormal, wallDist = ray.hitPos, ray.hitNormal, ray.distance
-            source = getObjectName(ray.hitObject)
+
+            -- Derive the distance rather than reading ray.distance.
+            --
+            -- [COMPAT, round two] The previous line compared ray.distance
+            -- directly and threw "attempt to compare nil with number" 1604
+            -- times in one session: the SharedRay copy that won the interface
+            -- reports a hit WITHOUT a distance field. That is the same root
+            -- cause as the getUnclipped crash - the interface shape is not
+            -- guaranteed - and fixing only the accessor moved the failure one
+            -- line down instead of removing it.
+            --
+            -- hitPos is the one field every copy provides, since it is the
+            -- point of the call. Measuring from it needs nothing optional and
+            -- cannot disagree with whatever the winning copy chose to report.
+            local dist = ray.distance
+            if type(dist) ~= "number" then
+                dist = (ray.hitPos - self.object.position):length()
+            end
+
+            if dist <= dynamicReach then
+                wallPos, wallNormal, wallDist = ray.hitPos, ray.hitNormal, dist
+                source = getObjectName(ray.hitObject)
+            end
         end
     end
 

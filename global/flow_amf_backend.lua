@@ -142,17 +142,48 @@ end
 -- the same reason as above - the snap target is a ledge lip the Sensor
 -- has already validated, and running a cage against the wall the player
 -- is grabbing clamps the snap to nothing.
+-- Maximum distance a single snap may move the actor. Every legitimate caller
+-- moves a short way: LedgeHang drops HANG_OFFSET_Z (125) to a lip it can
+-- already reach, Shimmy steps 30, the wall-kick nudges ~50. Anything an order
+-- of magnitude beyond that is not a move, it is a bad coordinate.
+local MAX_SNAP_DISTANCE = 600
+
 local function onSnapTo(data)
     local actor = data.actor
-    if actor and actor:isValid() then
-        local cell = data.cell or actor.cell
-        local rot = data.rotation or actor.rotation
+    if not (actor and actor:isValid()) then return end
 
-        actor:teleport(cell, data.position, {
-            rotation = rot,
-            onGround = false
-        })
+    -- [GUARD] Never teleport to an unvalidated position.
+    --
+    -- actor:teleport() with a nil position puts the actor at the cell origin,
+    -- and a position computed from a stale cross-cell coordinate lands
+    -- somewhere equally meaningless - which is how "attempting a ledge hang
+    -- teleported me to 0,0" happens with nothing in the log: no error is
+    -- raised, the engine simply does as it is told.
+    --
+    -- The caller is expected to send a sane position; this refuses the move
+    -- rather than executing a nonsensical one, and says so.
+    local pos = data.position
+    if not pos then
+        print("[FLOW:Backend] SnapTo refused: nil position")
+        return
     end
+
+    local dist = (pos - actor.position):length()
+    if dist > MAX_SNAP_DISTANCE then
+        print(string.format(
+            "[FLOW:Backend] SnapTo refused: %.0f units is beyond MAX_SNAP_DISTANCE (%d) - " ..
+            "almost certainly a stale or cross-cell coordinate",
+            dist, MAX_SNAP_DISTANCE))
+        return
+    end
+
+    local cell = data.cell or actor.cell
+    local rot = data.rotation or actor.rotation
+
+    actor:teleport(cell, pos, {
+        rotation = rot,
+        onGround = false
+    })
 end
 
 local function onUpdate(dt)

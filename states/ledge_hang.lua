@@ -25,6 +25,11 @@ local LedgeHangState = BaseState.new("LedgeHang")
 
 local KICK_RAY_OPTS = { ignore = mwSelf }
 
+-- A lip handed over from Shimmy further than this from the player is stale and
+-- is discarded. A real shimmy step moves STEP_DISTANCE (30), so anything near
+-- this range cannot be from the hang we are resuming.
+local LIP_SANITY_RANGE = 300
+
 -- =============================================================================
 -- CONFIGURATION
 -- =============================================================================
@@ -95,6 +100,23 @@ function LedgeHangState:enter(syncData)
     -- snap block below was skipped, leaving wallNormal stale from the previous
     -- step and the body un-anchored.
     local resumeLip, resumeNormal = ShimmyState.consumeResultLip()
+
+    -- [RESTORED] Sanity-check the handed-over lip before trusting it.
+    --
+    -- Shimmy sets resultLip on entry and on every step, but ONLY LedgeHang
+    -- consumes it. End a shimmy any other way - WallBoost, a crouch-drop, a
+    -- fall, a cell change - and the value is left set. The next hang, possibly
+    -- much later and somewhere else entirely, consumed it and snapped the
+    -- player to that old position. Across a cell boundary the old coordinates
+    -- are meaningless in the new cell's space, which is how it presents as a
+    -- teleport to roughly the origin rather than merely a wrong ledge.
+    --
+    -- This guard existed and was lost in a merge. It is cheap: one subtraction
+    -- and a length compare, only on entry.
+    if resumeLip and (resumeLip - mwSelf.position):length() > LIP_SANITY_RANGE then
+        resumeLip, resumeNormal = nil, nil
+    end
+
     local lipSource = resumeLip or SensorExt.data.targetPos
 
     if lipSource then
