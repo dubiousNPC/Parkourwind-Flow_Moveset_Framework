@@ -66,6 +66,34 @@ end
 -- LANDING_BUFFER above it, so a low ceiling or a narrow top refuses a climb the
 -- player can plainly see is possible. That refusal is why jumping from a hang
 -- did nothing.
+-- Refusal suppression, matching vault.lua's.
+--
+-- [RESPONSIVENESS FIX] Mantle had NONE. A refused Mantle was re-entered on the
+-- very next frame off the same unchanged sensor data and refused again,
+-- indefinitely. Airborne's update does not run on a frame where Mantle is the
+-- active state, so that thrash was stealing every other frame from the Vault,
+-- LedgeHang and Roll checks that live there - which is why Vault went sluggish
+-- too, and why it was worst in the air.
+--
+-- Target-aware, as in vault.lua: only the refused candidate is suppressed, so
+-- moving to a different target retries immediately.
+local BLOCK_DURATION = 0.35
+local BLOCK_RETRY_RADIUS = 40.0
+local blockedUntil = 0
+local blockedPos = nil
+
+function MantleState.isBlocked(candidate)
+    if core.getRealTime() >= blockedUntil then return false end
+    if not (blockedPos and candidate) then return true end
+    return (candidate - blockedPos):length() < BLOCK_RETRY_RADIUS
+end
+
+local function refuse(state)
+    blockedPos = Sensor.data.targetPos
+    blockedUntil = core.getRealTime() + BLOCK_DURATION
+    state.abort = true
+end
+
 local destinationVouched = false
 
 function MantleState.vouchDestination()
@@ -128,12 +156,15 @@ function MantleState:enter(syncData)
 
     targetPos = rawLedge + util.vector3(0, 0, LANDING_BUFFER) + pushDir * LEDGE_PUSH_IN
     
-    -- Validate Height
+    -- Validate Height. Routed through refuse() because this one IS reachable
+    -- with the sensor still reporting Mantle - without suppression it re-enters
+    -- and re-refuses every frame. Target-aware, so climbing to a different
+    -- ledge retries at once.
     if targetPos.z <= startPos.z then
         if Settings.debugMode() then
             print("[FLOW][mantle] refused: target at or below start height")
         end
-        self.abort = true
+        refuse(self)
         return
     end
     
@@ -163,14 +194,14 @@ function MantleState:enter(syncData)
         if Settings.debugMode() then
             print("[FLOW][mantle] refused: no floor under destination")
         end
-        self.abort = true
+        refuse(self)
         return
     end
     if nearby.castRay(targetPos, destTop, DEST_RAY_OPTS).hit then
         if Settings.debugMode() then
             print("[FLOW][mantle] refused: no headroom above destination")
         end
-        self.abort = true
+        refuse(self)
         return
     end
 

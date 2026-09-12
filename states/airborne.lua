@@ -11,6 +11,7 @@ local SensorExt = require('core/optional/sensor_ext')
 local RollState = require('states/roll')
 local InputManager = require('core/input')
 local VaultState = require('states/vault')
+local MantleState = require('states/mantle')
 
 local AirborneState = BaseState.new("Airborne")
 
@@ -209,7 +210,7 @@ end
 function AirborneState:update(dt, syncData, inputData)
     -- 1. Obstacle Interaction (Mid-Air) - jump-gated, matching Idle
     if inputData.jump then
-        if Sensor.data.interaction == "Vault" and not VaultState.isBlocked() then
+        if Sensor.data.interaction == "Vault" and not VaultState.isBlocked(Sensor.data.targetPos) then
             return "Vault"
         end
 
@@ -233,7 +234,7 @@ function AirborneState:update(dt, syncData, inputData)
         end
 
         -- C. Mantling (Medium obstacles)
-        if Sensor.data.interaction == "Mantle" then
+        if Sensor.data.interaction == "Mantle" and not MantleState.isBlocked(Sensor.data.targetPos) then
             return "Mantle"
         end
     end

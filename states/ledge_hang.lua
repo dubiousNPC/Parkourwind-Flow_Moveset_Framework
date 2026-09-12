@@ -17,6 +17,7 @@ local I = require('openmw.interfaces')
 local nearby = require('openmw.nearby')
 local camera = require('openmw.camera')
 local Sensor = require('core/sensor')
+local Settings = require('settings')
 local SensorExt = require('core/optional/sensor_ext')
 local ShimmyState = require('states/shimmy')
 local MantleState = require('states/mantle')
@@ -82,7 +83,9 @@ end
 -- =============================================================================
 
 function LedgeHangState:enter(syncData)
-    print("[FLOW_STATE] >>> ENTERING LEDGE HANG")
+    -- Per-event, so gated: this fired on every grab and every shimmy step's
+    -- return to the hang, which buried anything worth reading.
+    if Settings.debugMode() then print("[FLOW_STATE] >>> ENTERING LEDGE HANG") end
     
     local DebugHUD = require('core/debug_hud')
     DebugHUD.update("LedgeHang", SensorExt.data.debugReason, "GRABBED")
@@ -150,7 +153,7 @@ function LedgeHangState:enter(syncData)
 end
 
 function LedgeHangState:exit()
-    print("[FLOW_STATE] <<< EXITING LEDGE HANG")
+    if Settings.debugMode() then print("[FLOW_STATE] <<< EXITING LEDGE HANG") end
     applyGravityHack(false)
     
     I.Controls.overrideMovementControls(false)

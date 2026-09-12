@@ -97,8 +97,17 @@ function StateManager.setState(nextStateName, syncData)
 
     -- Visual Feedback for Parkour Actions. Announce the START of an action,
     -- not every internal step of one.
+    --
+    -- Behind the Debug HUD setting: these banners are a development aid, not a
+    -- feature. In normal play the animation IS the feedback, and a caption on
+    -- every vault is noise - it also reads as a status report, which is how a
+    -- refused Mantle managed to look like a successful one for several
+    -- sessions. Same switch as the console trace below, so diagnostics travel
+    -- together.
     local continuation = isContinuation(nextStateName, prevStateName)
-    if not continuation then
+    local debugOn = Settings.debugMode()
+
+    if debugOn and not continuation then
         if nextStateName == "Vault" or nextStateName == "Mantle" then
             ui.showMessage(">>> ACTION: " .. string.upper(nextStateName) .. " <<<", { showInDialogue = false })
         elseif nextStateName == "LedgeHang" then
@@ -108,7 +117,7 @@ function StateManager.setState(nextStateName, syncData)
 
     -- Console logging for debugging history. Continuations are skipped for the
     -- same reason, so a traverse does not bury the transitions worth seeing.
-    if Settings.debugMode() and not continuation then
+    if debugOn and not continuation then
         ui.printToConsole("[FLOW:FSM] Transition > " .. nextStateName, ui.CONSOLE_COLOR.Success)
     end
 end

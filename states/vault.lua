@@ -77,7 +77,28 @@ local DESCENT_CAGE_START = 0.55  -- progress fraction after which the cage appli
 -- frame off the same Sensor data, so without this the state would be
 -- entered and rejected repeatedly - and because Vault is in
 -- playerAnim.lua's ONE_SHOT_STATES, each entry would retrigger pwvault1.
-local BLOCK_DURATION = 0.6
+-- Refusal suppression.
+--
+-- [RESPONSIVENESS FIX] This was a blanket time block: ANY refusal suppressed
+-- the state for 0.6s regardless of where the player then went. Approaching
+-- geometry while airborne produces refusals constantly - the candidate target
+-- changes every frame as you move - so the player spent most of an approach
+-- locked out of a move that had become valid, which reads as the whole
+-- mechanic going unresponsive.
+--
+-- The block now remembers WHICH target was refused and only suppresses that
+-- one. Move to a materially different candidate and the retry is immediate.
+-- The timer remains as an upper bound for the identical-target case.
+--
+-- Shortened as well: the only thing this guards against is per-frame re-entry
+-- thrash, and that became far cheaper once state_manager stopped announcing
+-- and animating a refused entry.
+local BLOCK_DURATION = 0.35
+
+-- How far a new candidate must be from the refused one to count as a
+-- different target worth retrying.
+local BLOCK_RETRY_RADIUS = 40.0
+local blockedPos = nil
 local blockedUntil = 0
 
 -- Internals
@@ -88,8 +109,13 @@ local estimatedDuration = 0.5
 -- Queried by states/idle.lua and states/airborne.lua before they hand off
 -- here, so a refused vault doesn't re-enter (and re-fire its animation)
 -- every frame while the player is still facing the same wall.
-function VaultState.isBlocked()
-    return core.getRealTime() < blockedUntil
+-- `candidate` is the target the caller is about to attempt. Pass it and a
+-- different target retries immediately; omit it and the old time-only
+-- behaviour applies.
+function VaultState.isBlocked(candidate)
+    if core.getRealTime() >= blockedUntil then return false end
+    if not (blockedPos and candidate) then return true end
+    return (candidate - blockedPos):length() < BLOCK_RETRY_RADIUS
 end
 
 function VaultState:enter(syncData)
@@ -135,6 +161,7 @@ function VaultState:enter(syncData)
     -- [SAFETY 1] Too tall to be a hurdle - refuse rather than launch the
     -- player over a building or clip through it.
     if (highestZ - startPos.z) > MAX_VAULTABLE_RISE then
+        blockedPos = Sensor.data.targetPos
         blockedUntil = core.getRealTime() + BLOCK_DURATION
         self.abort = true
         return
@@ -173,6 +200,7 @@ function VaultState:enter(syncData)
     local probeEnd = util.vector3(rawLandPos.x, rawLandPos.y, probeZ)
 
     if nearby.castRay(probeStart, probeEnd, PROFILE_RAY_OPTS).hit then
+        blockedPos = Sensor.data.targetPos
         blockedUntil = core.getRealTime() + BLOCK_DURATION
         self.abort = true
         return
@@ -187,6 +215,7 @@ function VaultState:enter(syncData)
 
     local floorRes = nearby.castRay(destTop, destFloorEnd, PROFILE_RAY_OPTS)
     if not floorRes.hit then
+        blockedPos = Sensor.data.targetPos
         blockedUntil = core.getRealTime() + BLOCK_DURATION
         self.abort = true
         return
@@ -196,6 +225,7 @@ function VaultState:enter(syncData)
     -- below means the "landing spot" is really a drop the player didn't ask
     -- for.
     if (rawLandPos.z - floorRes.hitPos.z) > DEST_FLOOR_TOLERANCE then
+        blockedPos = Sensor.data.targetPos
         blockedUntil = core.getRealTime() + BLOCK_DURATION
         self.abort = true
         return
@@ -204,6 +234,7 @@ function VaultState:enter(syncData)
     -- Headroom: refuse if the player would materialise inside a ceiling.
     local headRes = nearby.castRay(rawLandPos, destTop, PROFILE_RAY_OPTS)
     if headRes.hit then
+        blockedPos = Sensor.data.targetPos
         blockedUntil = core.getRealTime() + BLOCK_DURATION
         self.abort = true
         return

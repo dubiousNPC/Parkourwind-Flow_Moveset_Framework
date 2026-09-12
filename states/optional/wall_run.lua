@@ -277,7 +277,7 @@ function WallRunState:update(dt, syncData, inputData)
     if DEBUG_MODE then
         debugTimer = debugTimer + dt
         if debugTimer > DEBUG_INTERVAL then
-            print(string.format("[FLOW] WallRun | Z: %.0f | Spd: %.0f | Launch: %s", verticalVelocity, forwardSpeed, tostring(isLaunching)))
+            if Settings.debugMode() then print(string.format("[FLOW] WallRun | Z: %.0f | Spd: %.0f | Launch: %s", verticalVelocity, forwardSpeed, tostring(isLaunching))) end
             debugTimer = 0
         end
     end
