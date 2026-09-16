@@ -1,6 +1,13 @@
 ---@omw-context player
 --[[
-    AnimRefresh v1 -- perspective-change notifier
+    AnimRefresh v3 -- perspective-change notifier
+
+    THE FILENAME CARRIES THE VERSION ON PURPOSE. The version guard below only
+    helps when two copies load as two different scripts. Two mods both shipping
+    `AnimRefresh_v2.lua` occupy ONE VFS path, so whichever data directory wins
+    is the only file that exists -- and if that is somebody's older v2, this v3
+    is simply not present and the guard never runs. Renaming on a version bump
+    is what lets the guard do its job.
 
     THE PROBLEM
     -----------
@@ -71,6 +78,35 @@
     by load order -- an improved v1 shipped next to somebody else's old v1 is a
     coin flip. Any change to delivery behaviour needs the number raised or it
     may simply not run.
+
+    VERSION 3 fixes a hole that made v1 and v2 lose the change entirely when the
+    engine finished rebuilding the model LATER than SETTLE_DELAY.
+
+    The trigger fires on the KEY PRESS. v2's settle timer then wrote
+    `lastMode = camera.getMode()` -- re-baselining, 0.10s after the press. If
+    the engine completed its rebuild after that moment it dropped the attached
+    VFX, and by then:
+
+      * the trigger path had already fired and would not fire again, and
+      * checkMode compared getMode() against a lastMode that was ALREADY the
+        new mode, saw no change, and never fired either.
+
+    The trigger path consumed the transition the poll would otherwise have
+    caught, and the subscriber's VFX stayed gone until something unrelated
+    changed. The retry added in v2 could not help: the bones exist throughout a
+    perspective switch, so subscribers correctly reported ready and the retry
+    never engaged. Readiness was the wrong question; the refresh simply landed
+    too early and nothing asked again.
+
+    Two changes:
+
+      * `lastMode` is now owned by checkMode alone. The trigger schedules a
+        delivery and does not touch the baseline, so the poll still observes the
+        real transition and fires on it.
+      * every delivery is followed by a CONFIRM pass. One fixed settle delay is
+        a guess; a second delivery half a second later costs one timer on an
+        event that happens a few times an hour and covers a rebuild that
+        finishes late.
 ]]
 
 local camera = require('openmw.camera')
@@ -78,7 +114,7 @@ local input  = require('openmw.input')
 local async  = require('openmw.async')
 local I      = require('openmw.interfaces')
 
-local MY_VERSION = 2
+local MY_VERSION = 3
 
 if I.AnimRefresh and I.AnimRefresh.version >= MY_VERSION then
     return
@@ -91,6 +127,11 @@ local SETTLE_DELAY = 0.10
 
 -- Backstop poll rate for mode changes that arrive without a TogglePOV press.
 local POLL_INTERVAL = 1.0
+
+-- A second delivery after every refresh. SETTLE_DELAY is one guess at how long
+-- the engine takes to swap the animation object; this covers the case where it
+-- took longer and wiped what the first delivery attached.
+local CONFIRM_DELAY = 0.5
 
 local subscribers   = {}
 local subscriberCount = 0
@@ -173,10 +214,22 @@ local function scheduleRefresh(previous)
     pendingSettle = true
     async:newUnsavableSimulationTimer(SETTLE_DELAY, function()
         pendingSettle = false
-        local mode = camera.getMode()
-        lastMode = mode
         if subscriberCount == 0 then return end
+        local mode = camera.getMode()
+        -- NOTE: lastMode is deliberately NOT written here. This runs off the
+        -- key press, and the mode may not have settled; writing it would hide
+        -- the real transition from checkMode. checkMode owns the baseline.
         fire(mode, previous)
+
+        -- Confirmation pass. If the engine replaced the animation object after
+        -- the delivery above, whatever that delivery attached is gone and the
+        -- subscriber has no way to notice -- there is no "my vfx was removed"
+        -- event to hook. Delivering once more is the only reliable cover, and
+        -- it is cheap: one timer, only while subscribed, only on a change.
+        async:newUnsavableSimulationTimer(CONFIRM_DELAY, function()
+            if subscriberCount == 0 then return end
+            fire(camera.getMode(), previous)
+        end)
     end)
 end
 

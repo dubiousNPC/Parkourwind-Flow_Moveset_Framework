@@ -5,6 +5,7 @@ local mwSelf = require('openmw.self')
 local Sensor = require('core/sensor')
 local VaultState = require('states/vault')
 local MantleState = require('states/mantle')
+local LadderState = require('states/ladder')
 
 local IdleState = BaseState.new("Idle")
 
@@ -34,6 +35,17 @@ function IdleState:update(dt, syncData, inputData)
         local fat = types.Actor.stats.dynamic.fatigue(mwSelf).current
         if fat > 0 then
             return "Idle"
+        end
+    end
+
+    -- Ladder: forward into a recognised ladder static. Probed only on forward
+    -- input, so the extra ray costs nothing while standing still or running
+    -- past one.
+    if inputData.moveVector.y > 0.1 then
+        local lp, ln = LadderState.probe()
+        if lp then
+            LadderState.setLadder(lp, ln)
+            return "Ladder"
         end
     end
 

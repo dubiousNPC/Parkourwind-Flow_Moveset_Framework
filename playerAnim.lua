@@ -93,6 +93,18 @@ local GROUPS = {
     -- Directional entries. `variants` replaces `group`; the state selects
     -- which one via Anim.setVariant() immediately before the transition, so
     -- group names still appear ONLY in this file.
+    -- Ladder: three clips selected by travel direction via Anim.setVariant().
+    -- LOOPING - a climb continues for as long as the key is held, unlike the
+    -- one-shot moves, so the clip must not autoDisable partway up.
+    Ladder = {
+        variants = { up = "pwladderup", down = "pwladderdwn", idle = "pwladderidle" },
+        speed = 1,
+        priority = PRIORITY_FLOW_MAJOR,
+        blendMask = animation.BLEND_MASK.All,
+        startKey = "start",
+        stopKey = "stop",
+    },
+
     Shimmy = {
         variants = { left = "pwshimmyl1", right = "pwshimmyr1" },
         speed = 1,
@@ -131,7 +143,7 @@ local GROUPS = {
 -- groups; if the named group has no matching clip, nothing replaces it
 -- and the character T-poses for as long as the state is active. That is
 -- exactly what the removed WallJump entry ("pwwalljump") was doing.
-local LOOPING_STATES = { LedgeHang = true }
+local LOOPING_STATES = { LedgeHang = true, Ladder = true }
 local ONE_SHOT_STATES = { Vault = true, Mantle = true, Roll = true,
                           Shimmy = true, WallBoost = true }
 
@@ -178,11 +190,33 @@ function Anim.setVariant(name)
     pendingVariant = name
 end
 
+-- Last variant actually played, per state. resolveGroup falls back to this so
+-- a replay that sets no variant reuses the one in flight.
+local lastVariant = {}
+
 -- Resolves a GROUPS entry to an actual group name, honouring `variants`.
 local function resolveGroup(entry)
     if not entry then return nil end
     if entry.variants then
-        return entry.variants[pendingVariant or "right"]
+        -- Fallback chain, and the order matters.
+        --
+        -- This used to be a bare `pendingVariant or "right"`. That worked only
+        -- because every directional entry happened to have a "right" key -
+        -- Ladder's are up/down/idle, so a replay with no variant set resolved
+        -- to nil and the clip silently stopped. AnimRefresh's reissue is
+        -- exactly such a replay, and so is any future caller.
+        --
+        -- Prefer the variant just requested; else the one last played for this
+        -- state, which keeps a left shimmy replaying left rather than flipping
+        -- right; else any key at all, so a new entry cannot resolve to nil for
+        -- want of a convention it never adopted.
+        local key = pendingVariant or lastVariant[entry]
+        local group = key and entry.variants[key]
+        if not group then
+            for k, g in pairs(entry.variants) do key, group = k, g; break end
+        end
+        if key then lastVariant[entry] = key end
+        return group
     end
 
     -- List form: pick one at random. Restored after a merge dropped it - the
@@ -301,6 +335,28 @@ local lastRequest = nil
 
 reissue = function()
     if not lastRequest then return end
+
+    -- [GUARD] Only replay if the group has ACTUALLY stopped.
+    --
+    -- AnimRefresh v3 delivers twice per change: once after SETTLE_DELAY and
+    -- again after CONFIRM_DELAY (0.5s), covering a skeleton rebuild that
+    -- finishes late. Right for its intended clients - long-lived sitting and
+    -- riding poses - but FLOW's animations are nearly all SHORT ONE-SHOTS:
+    -- Vault, Mantle, Roll, Shimmy, WallBoost. Only LedgeHang and Ladder loop.
+    --
+    -- Replaying unconditionally would restart pwvault1 half a second into a
+    -- move already most of the way through, and hitch on every step of a held
+    -- shimmy. Testing whether the group still plays makes the confirm pass a
+    -- no-op when nothing was lost, which is what a second delivery should be.
+    --
+    -- Tested against currentGroup, NOT resolveGroup(): Vault and Mantle are
+    -- list-form and resolveGroup picks at RANDOM, so calling it here could
+    -- test a different clip than the one playing and replay over a healthy
+    -- animation. currentGroup is FLOW's own record of what was started.
+    if currentGroup and animation.isPlaying(self, currentGroup) then
+        return
+    end
+
     currentGroup = nil   -- force playGroup past its "already playing" guard
     playGroup(lastRequest.state, lastRequest.looping)
 end

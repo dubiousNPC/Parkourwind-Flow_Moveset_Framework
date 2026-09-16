@@ -23,6 +23,7 @@ local MantleState = require('states/mantle')
 local VaultState = require('states/vault')
 local LedgeHangState = require('states/ledge_hang')
 local RollState = require('states/roll')
+local LadderState = require('states/ladder')
 local ShimmyState = require('states/shimmy')
 local WallBoostState = require('states/wall_boost')
 -- WallJump has been removed entirely - it never worked as intended and
@@ -40,6 +41,7 @@ local REGISTERED_STATES = {
     VaultState,
     LedgeHangState,
     RollState,
+    LadderState,
     ShimmyState,
     WallBoostState
 }
@@ -90,7 +92,7 @@ local idleTick = H3.every(IDLE_THROTTLE_INTERVAL)
 -- costs two boolean writes and makes the fault unable to outlive a tick.
 local OVERRIDE_STATES = {
     Vault = true, Mantle = true, LedgeHang = true,
-    Shimmy = true, WallBoost = true,
+    Shimmy = true, WallBoost = true, Ladder = true,
 }
 
 local function onInit()

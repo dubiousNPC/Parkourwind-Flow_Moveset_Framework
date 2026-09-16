@@ -6,6 +6,9 @@ local input = require('openmw.input')
 local async = require('openmw.async')
 local types = require('openmw.types')
 local mwSelf = require('openmw.self')
+local util = require('openmw.util')
+local nearby = require('openmw.nearby')
+local Settings = require('settings')
 local Sensor = require('core/sensor')
 local SensorExt = require('core/optional/sensor_ext')
 local RollState = require('states/roll')
@@ -64,6 +67,33 @@ local LEDGE_GRAB_TOLERANCE = 20
 -- Forward stick/key threshold at the moment of the tap, mirroring
 -- surfAnimations' deadzone treatment of pself.controls.movement.
 local FORWARD_DEADZONE = 0.1
+
+-- Height window for arming the roll, borrowed from AcrobaticsEnhanced which
+-- gates its own roll the same way. Its comment names the reason: without a
+-- height check the press "kills the double-tap-jump-early exploit" only if it
+-- has to happen NEAR THE GROUND. FLOW's arm never expires, so a single press
+-- at the apex of any fall armed the entire descent - no timing skill at all.
+--
+-- A height window also beats the timer it replaced: a timer punishes long
+-- falls (press early, lose the attempt), while a height gate behaves the same
+-- at any fall height because it measures against the geometry being
+-- approached. Costs one downward ray PER PRESS, never per frame.
+local ROLL_HEIGHT_WINDOW = 256.0
+local ROLL_HEIGHT_PROBE = 5000.0
+
+-- No pcall: nearby.castRay is documented, always present, and reports a miss
+-- as res.hit == false rather than an error.
+local HEIGHT_RAY_OPTS = {
+    ignore = mwSelf,
+    collisionType = nearby.COLLISION_TYPE.World + nearby.COLLISION_TYPE.HeightMap,
+}
+
+local function heightAboveGround()
+    local p = mwSelf.position
+    local res = nearby.castRay(p, util.vector3(p.x, p.y, p.z - ROLL_HEIGHT_PROBE), HEIGHT_RAY_OPTS)
+    if res.hit then return p.z - res.hitPos.z end
+    return nil
+end
 
 local armed = false
 local armTimer = 0
@@ -133,6 +163,20 @@ input.registerTriggerHandler("Jump", async:callback(function()
 
     -- Forward must be held at the tap.
     if InputManager.intents.moveVector.y <= FORWARD_DEADZONE then return end
+
+    -- Height gate: the press only counts near the ground. See
+    -- ROLL_HEIGHT_WINDOW for why this is not a timer.
+    local h = heightAboveGround()
+    if not h or h > ROLL_HEIGHT_WINDOW then
+        if Settings.debugMode() then
+            print(string.format("[FLOW][roll] tap REJECTED h=%s window=%.0f",
+                h and string.format("%.0f", h) or "nil", ROLL_HEIGHT_WINDOW))
+        end
+        return
+    end
+    if Settings.debugMode() then
+        print(string.format("[FLOW][roll] ARMED h=%.0f", h))
+    end
 
     armed = true
     armTimer = 0
