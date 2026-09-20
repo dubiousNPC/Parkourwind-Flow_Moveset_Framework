@@ -104,11 +104,12 @@ local function onInit()
 end
 
 -- Runs once all of the player's local scripts have loaded, which is the
--- documented-safe point to touch I.SharedRay: if another mod bundles a
--- newer SharedRay_v2.lua, the version race between copies has already
--- resolved by the time onActive fires.
+-- documented-safe point to touch I.SharedRay and I.AnimRefresh: whichever
+-- copy of each won the version race has claimed the interface by the time
+-- onActive fires, wherever the engine placed it in the load order.
 local function onActive()
     Sensor.registerSharedRay()
+    Anim.registerAnimRefresh()
 end
 
 local function onUpdate(dt)

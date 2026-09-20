@@ -174,10 +174,29 @@ deliver = function(keys, mode, previous, attempt)
         -- ghost this service should not create.
         local callback = subscribers[key]
         if callback then
-            local ok, result = pcall(callback, mode, previous)
-            if not ok then
-                print("[AnimRefresh] callback error in '" .. tostring(key) .. "': " .. tostring(result))
-            elseif result == false then
+            -- NO pcall. A subscriber that throws propagates, and the engine
+            -- reports it with the failing mod's own stack.
+            --
+            -- The pcall that used to be here was the one this suite's research
+            -- called a justified use: third-party callback isolation. It is
+            -- gone anyway, and the trade is worth stating plainly.
+            --
+            -- LOST: one throwing subscriber no longer stops delivery to the
+            -- others on that refresh. That is a real cost and the reason to
+            -- reverse this if it ever bites.
+            --
+            -- GAINED: a broken subscriber is a stack trace naming the mod that
+            -- broke, on the first refresh, instead of a print nobody reads
+            -- repeated a few times an hour forever. This service fires a
+            -- handful of times a session and a subscriber that throws is
+            -- always a bug in that subscriber -- never a supported state -- so
+            -- there is nothing here for a guard to legitimately handle.
+            --
+            -- It also removes the last place where a typo inside a callback
+            -- could survive a play session, which is the failure mode that
+            -- cost this suite the most time.
+            local result = callback(mode, previous)
+            if result == false then
                 notReady = notReady or {}
                 notReady[key] = true
             end
@@ -201,8 +220,6 @@ deliver = function(keys, mode, previous, attempt)
     end
 end
 
--- A subscriber blowing up must not stop delivery to the others, same rule
--- SharedRay applies to its callbacks.
 local function fire(mode, previous)
     local all = {}
     for key in pairs(subscribers) do all[key] = true end
@@ -272,6 +289,14 @@ end
 
 local function subscribe(key, callback)
     if not key then return end
+    -- Validated here rather than at call time. With no pcall around delivery,
+    -- a non-function subscriber would raise from inside a timer callback,
+    -- where the stack says "AnimRefresh" and not which mod registered it.
+    -- Checking at registration puts the error where the caller can act on it.
+    if callback ~= nil and type(callback) ~= 'function' then
+        error(("[AnimRefresh] subscribe('%s', ...) needs a function, got %s")
+              :format(tostring(key), type(callback)))
+    end
     if subscribers[key] == nil and callback ~= nil then
         subscriberCount = subscriberCount + 1
     elseif subscribers[key] ~= nil and callback == nil then

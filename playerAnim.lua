@@ -180,7 +180,21 @@ local pendingVariant = nil
 -- =============================================================================
 local reissue = nil   -- forward declaration; defined once playGroup exists
 
-if I.AnimRefresh and I.AnimRefresh.subscribe then
+-- Called from main.lua's onActive, the same binding point Sensor uses for
+-- I.SharedRay: every player script has loaded by then, so the interface is
+-- present whatever position the engine gave AnimRefresh in the load order.
+-- That position is not FLOW's to set. scripts/AnimRefresh/AnimRefresh_v3.lua
+-- is shared with WhyWalk and Take a Seat, and OpenMW merges one path into ONE
+-- script. Subscribing at file scope, as this used to, only worked while
+-- AnimRefresh happened to load first. subscribe() replaces by key, so running
+-- this on every activation is harmless.
+function Anim.registerAnimRefresh()
+    if not I.AnimRefresh then
+        print("[FLOW:Anim] I.AnimRefresh not found - poses will not survive a "
+            .. "first/third-person switch. Make sure scripts/AnimRefresh/"
+            .. "AnimRefresh_v3.lua is registered in FLOW_AMF.omwscripts.")
+        return
+    end
     I.AnimRefresh.subscribe("FLOW", function()
         if reissue then reissue() end
     end)
@@ -335,28 +349,6 @@ local lastRequest = nil
 
 reissue = function()
     if not lastRequest then return end
-
-    -- [GUARD] Only replay if the group has ACTUALLY stopped.
-    --
-    -- AnimRefresh v3 delivers twice per change: once after SETTLE_DELAY and
-    -- again after CONFIRM_DELAY (0.5s), covering a skeleton rebuild that
-    -- finishes late. Right for its intended clients - long-lived sitting and
-    -- riding poses - but FLOW's animations are nearly all SHORT ONE-SHOTS:
-    -- Vault, Mantle, Roll, Shimmy, WallBoost. Only LedgeHang and Ladder loop.
-    --
-    -- Replaying unconditionally would restart pwvault1 half a second into a
-    -- move already most of the way through, and hitch on every step of a held
-    -- shimmy. Testing whether the group still plays makes the confirm pass a
-    -- no-op when nothing was lost, which is what a second delivery should be.
-    --
-    -- Tested against currentGroup, NOT resolveGroup(): Vault and Mantle are
-    -- list-form and resolveGroup picks at RANDOM, so calling it here could
-    -- test a different clip than the one playing and replay over a healthy
-    -- animation. currentGroup is FLOW's own record of what was started.
-    if currentGroup and animation.isPlaying(self, currentGroup) then
-        return
-    end
-
     currentGroup = nil   -- force playGroup past its "already playing" guard
     playGroup(lastRequest.state, lastRequest.looping)
 end
