@@ -1,0 +1,105 @@
+# regressions.txt - fixes that have been lost in a merge before.
+#
+# One record per fix. `needs` is literal text, or a bare identifier matched on
+# word boundaries. Comments in the target file are stripped before matching, so
+# a marker cannot be satisfied by a comment that only mentions the constant.
+#
+# Run:  python3 tools/check_regressions.py .
+#
+# ADD A RECORD whenever a fix is verified in play. The cost is two lines; the
+# alternative is rediscovering it in a testing session, which has now happened
+# five times.
+
+file: global/flow_amf_backend.lua
+why: the collision cage clamped Vault and Mantle to zero movement - Hookshot's stuck threshold measures over a 50ms window and was applied per tick. Reverted to a direct teleport; MAX_SNAP_DISTANCE is the backstop that replaced it.
+needs: MAX_SNAP_DISTANCE
+
+file: global/flow_amf_backend.lua
+why: openmw.nearby is local|player only. Requiring it here raised 'module not found' at load, so the entire backend never started and every move fired its state and animation while nothing moved. This asserts the require has not come back.
+needs: not-present openmw.nearby
+
+file: states/ledge_hang.lua
+why: without LIP_SANITY_RANGE a stale lip handed over by Shimmy was accepted and the player was teleported to 0,0.
+needs: LIP_SANITY_RANGE
+
+file: playerAnim.lua
+why: GROUPS.Vault and GROUPS.Mantle must stay in LIST form. A merge reverted them to a plain string and only pwvault1 ever played.
+needs: pwvault1
+needs: pwvault2
+needs: pwvault3
+needs: pwmantle1
+needs: pwmantle2
+needs: pwmantle3
+
+file: playerAnim.lua
+why: resolveGroup must handle the list form. Without the table branch, playBlended received a table and raised 'expected string, received table'.
+needs: type(entry.group) == "table"
+
+file: playerAnim.lua
+why: reissue() must be idempotent. AnimRefresh v4 delivers on subscribe and twice on load, so without the isPlaying guard a cell change restarts a hang pose from frame 0 - and FLOW's verify opt-in does it again a second later.
+needs: animation.isPlaying
+
+file: playerAnim.lua
+why: FLOW's verify opt-in is only valid while the isPlaying guard above exists. Guarded together so removing one flags the other.
+needs: verify = true
+
+file: states/shimmy.lua
+why: WallBoost fires on JUMP ALONE. A merge restored 'jump AND back', which is close to unreachable - holding a lateral key is what keeps you in Shimmy.
+needs: not-present inputData.moveVector.y < 0
+
+file: states/airborne.lua
+why: core.isWorldPaused is a FUNCTION. Referenced without calling, the truthy function object made the Jump trigger handler return on line one every invocation and the roll could never arm.
+needs: core.isWorldPaused()
+
+file: core/state_manager.lua
+why: a state may refuse on entry. Announcing and animating before checking abort is what made a refused Mantle look like a successful one for several sessions.
+needs: StateManager.activeState.abort
+
+file: core/sensor.lua
+why: SharedRay's interface SHAPE is not guaranteed by its version number. Reading ray.distance directly raised 'attempt to compare nil with number' 1604 times in one session; the distance must be derived from hitPos.
+needs: I.SharedRay.getUnclipped or I.SharedRay.get
+needs: type(dist) ~= "number"
+
+file: core/sensor.lua
+why: height bands are derived from PLAYER_HEIGHT fractions. Hand-tuned unit constants are what put the spread of influence wrong - MIN_VAULT_HEIGHT at 25 offered a vault over an ankle-high curb.
+needs: VAULT_MIN_FRAC
+needs: VAULT_MAX_FRAC
+needs: MANTLE_MAX_FRAC
+
+file: core/sensor.lua
+why: the Vault height cap must apply to THIN obstacles too. Without it a chest-high railing got the hurdle the thick branch correctly refused.
+needs: vaultHeight
+
+file: core/optional/sensor_ext.lua
+why: the LedgeHang catch band must be declared, not emergent. It used to fall out of a cast height, a hard-coded +40 and a 60-unit drop, which multiplied out to 90-137% of player height and overlapped Mantle's band.
+needs: GRAB_MIN_FRAC
+needs: GRAB_MAX_FRAC
+
+file: states/airborne.lua
+why: the LedgeHang reach check measures against the band floor, not the wall-probe height. GRAB_HEIGHT sits below the band on purpose, so reading it here let the grab reach slightly downwards.
+needs: SensorExt.GRAB_MIN_HEIGHT
+
+file: main.lua
+why: the throttle gate reads self.controls.run. Written as mwSelf - the idiom every other file uses - it indexed an undeclared global and threw every frame, killing Sensor, SensorExt, StateManager and the HUD while init still logged normally.
+needs: self.controls.run
+
+file: main.lua
+why: Anim.verifyGroups must stay guarded. Unguarded it raised 'attempt to call field verifyGroups (a nil value)' and took down onUpdate when main.lua and playerAnim.lua came from different builds.
+needs: if Anim.verifyGroups then
+
+file: FLOW_AMF.omwscripts
+why: AnimRefresh must be registered at the SHARED path so OpenMW merges FLOW's copy with every other mod's into one script. The filename carries the version, so a bump changes this line.
+needs: scripts/AnimRefresh/AnimRefresh_v4.lua
+
+file: FLOW_AMF.omwscripts
+why: SharedRay must be registered at the shared path for the same reason. Third-party file - never edit its contents.
+needs: scripts/SharedRay/SharedRay_v2.lua
+
+file: core/state_manager.lua
+why: ui.CONSOLE_COLOR has exactly four members - Default, Error, Success, Info. '.Failure' was nil and was handed to printToConsole, whose colour argument is not optional.
+needs: not-present CONSOLE_COLOR.Failure
+
+file: core/h3lp_compat.lua
+why: the soft dependency is tested with vfs.fileExists, not pcall(require). The pcall could not tell 'h3lp absent' from 'h3lp threw while loading', so a broken h3lp was silently replaced by FLOW's fallback with nothing printed.
+needs: vfs.fileExists
+needs: not-present pcall

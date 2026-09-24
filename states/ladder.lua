@@ -88,6 +88,11 @@ end
 --
 -- Called only on a forward keypress, never per frame.
 function LadderState.probe()
+    -- The transition would be refused by the state manager anyway; this saves
+    -- the ray that would have justified asking for it. Returning nil is already
+    -- this function's "no ladder here", so no caller needs to change.
+    if not Settings.stateEnabled("Ladder") then return nil end
+
     local pos = mwSelf.position
     local yaw = mwSelf.rotation:getYaw()
     local forward = util.transform.rotateZ(yaw):apply(util.vector3(0, 1, 0))

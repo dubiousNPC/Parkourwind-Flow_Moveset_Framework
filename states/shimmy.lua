@@ -33,6 +33,7 @@ local types = require('openmw.types')
 local BaseState = require('states/base_state')
 local Anim = require('playerAnim')
 local WallBoostState = require('states/wall_boost')
+local Settings = require('settings')
 
 local ShimmyState = BaseState.new("Shimmy")
 
@@ -133,6 +134,11 @@ end
 -- which succeeds precisely because it probes downward from above and behind
 -- the edge rather than from the body.
 function ShimmyState.probeStep(playerPos, lipPos, wallNormal, dir)
+    -- Two rays saved per direction press while hanging. nil is already this
+    -- function's "the ledge does not continue that way", so ledge_hang keeps
+    -- holding the player rather than needing to know about the setting.
+    if not Settings.stateEnabled("Shimmy") then return nil end
+
     if not playerPos or not lipPos then return nil end
 
     local lateral = ShimmyState.lateralVector(wallNormal)
@@ -276,7 +282,13 @@ function ShimmyState:update(dt, syncData, inputData)
     -- No direction input is needed anyway - the shimmy already knows which way
     -- the player is travelling, so `dir` picks the animation variant and the
     -- wall normal supplies the push. Restored after a merge reverted it.
-    if inputData.jump then
+    -- Checked here, not left to the state manager. Refusing the transition
+    -- would work, but this branch runs every tick the key is held, so the
+    -- player would keep asking and keep being refused while the step it
+    -- interrupted never finished. Skipping the branch instead lets the step
+    -- complete and hand back to LedgeHang, which is what happened before
+    -- WallBoost existed.
+    if inputData.jump and Settings.stateEnabled("WallBoost") then
         WallBoostState.setLaunch(wallNormal, dir)
         return "WallBoost"
     end

@@ -62,6 +62,31 @@ function StateManager.setState(nextStateName, syncData)
         return
     end
 
+    -- PER-STATE TOGGLE. One lookup at the single point every transition passes
+    -- through, which is why it is here and not repeated across nine state files
+    -- and every branch inside them: LedgeHang can be entered from Airborne or
+    -- from Shimmy, Mantle from Idle, Airborne or a ledge climb-up, and a check
+    -- scattered across those routes is a check with a hole in it.
+    --
+    -- Refusing leaves the CURRENT state active rather than forcing a fallback.
+    -- The state that asked simply keeps running and will ask again next tick if
+    -- the condition persists, which is the behaviour it already has when Vault
+    -- or Mantle refuses a destination. Forcing Airborne here instead would
+    -- yank a hanging player off a ledge the moment they pressed toward a
+    -- disabled Shimmy.
+    --
+    -- Silent unless debugging. A disabled state's trigger condition can be true
+    -- for many consecutive ticks - a player holding jump at a wall with Mantle
+    -- off - and a print per tick is the log spam this mod has been bitten by
+    -- more than once.
+    if not Settings.stateEnabled(nextStateName) then
+        if Settings.debugMode() then
+            ui.printToConsole("[FLOW:FSM] " .. nextStateName .. " DISABLED in settings",
+                ui.CONSOLE_COLOR.Info)
+        end
+        return
+    end
+
     local prevStateName = StateManager.activeState and StateManager.activeState.name or "None"
 
     -- Exit current
@@ -85,8 +110,13 @@ function StateManager.setState(nextStateName, syncData)
     -- still returns to Airborne on its own next update.
     if StateManager.activeState.abort then
         if Settings.debugMode() then
+            -- Error, not Failure. ui.CONSOLE_COLOR has exactly four members -
+            -- Default, Error, Success, Info - so `.Failure` was nil and this
+            -- line handed nil to printToConsole, whose colour argument is not
+            -- optional. It only ever ran behind the debug setting, which is the
+            -- only reason it was not noticed.
             ui.printToConsole("[FLOW:FSM] " .. nextStateName .. " REFUSED on entry",
-                ui.CONSOLE_COLOR.Failure)
+                ui.CONSOLE_COLOR.Error)
         end
         return
     end

@@ -4,5 +4,6 @@ description: |
   Advanced Movement Framework
 
 SettingsFLOW_AMF: "Movement Settings"
+SettingsFLOW_AMF_States: "Enabled Moves"
 modSettingsTitle: "FLOW Configuration"
 modSettingsDesc: "Configure movement mechanics."

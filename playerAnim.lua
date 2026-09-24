@@ -66,6 +66,7 @@ local Anim = {}
 -- =============================================================================
 local PRIORITY_FLOW       = animation.PRIORITY.Weapon
 local PRIORITY_FLOW_MAJOR = animation.PRIORITY.Block
+local PRIORITY_FLOW_FULL  = animation.PRIORITY.Storm
 
 local GROUPS = {
     -- List form: interchangeable clips for the same action. These are VISUAL
@@ -117,7 +118,7 @@ local GROUPS = {
     WallBoost = {
         variants = { left = "pwboostbkl", right = "pwboostbkr" },
         speed = 1,
-        priority = PRIORITY_FLOW_MAJOR,
+        priority = PRIORITY_FLOW_FULL,
         blendMask = animation.BLEND_MASK.All,
         startKey = "start",
         stopKey = "stop",
@@ -125,7 +126,7 @@ local GROUPS = {
 
     Roll      = {
         group = "pwroll1", speed = 1,  -- one-shot landing roll
-        priority = PRIORITY_FLOW_MAJOR,
+        priority = PRIORITY_FLOW_FULL,
         blendMask = animation.BLEND_MASK.All,
         startKey = "start",
         stopKey = "stop",
@@ -183,21 +184,42 @@ local reissue = nil   -- forward declaration; defined once playGroup exists
 -- Called from main.lua's onActive, the same binding point Sensor uses for
 -- I.SharedRay: every player script has loaded by then, so the interface is
 -- present whatever position the engine gave AnimRefresh in the load order.
--- That position is not FLOW's to set. scripts/AnimRefresh/AnimRefresh_v3.lua
+-- That position is not FLOW's to set. scripts/AnimRefresh/AnimRefresh_v4.lua
 -- is shared with WhyWalk and Take a Seat, and OpenMW merges one path into ONE
 -- script. Subscribing at file scope, as this used to, only worked while
 -- AnimRefresh happened to load first. subscribe() replaces by key, so running
 -- this on every activation is harmless.
+--
+-- I.AnimRefresh is looked up here on every call and never cached in a local.
+-- v4's contract spells out why: if an older bundled copy loaded first and this
+-- one overrode it, a cached reference still points at the dead copy.
+--
+-- WHY v4 AND NOT v3. v3 fired on every camera-mode hop, so auto-vanity after
+-- ~30s idle counted as a perspective change - a player hanging from a ledge
+-- long enough to go idle had the hang pose restarted for no reason. v4 watches
+-- only the first-person boundary, which is the only one that rebuilds the
+-- model, and adds the two causes v3 missed that FLOW is exposed to: the Rest /
+-- Travel / Training / Jail menus, and loading a save.
 function Anim.registerAnimRefresh()
     if not I.AnimRefresh then
         print("[FLOW:Anim] I.AnimRefresh not found - poses will not survive a "
             .. "first/third-person switch. Make sure scripts/AnimRefresh/"
-            .. "AnimRefresh_v3.lua is registered in FLOW_AMF.omwscripts.")
+            .. "AnimRefresh_v4.lua is registered in FLOW_AMF.omwscripts.")
         return
     end
+
+    -- verify = true buys a second delivery a second after a boundary change,
+    -- covering a model rebuild that finishes AFTER the first one (nothing in
+    -- openmw.animation can report that, so a second call is the only cover).
+    --
+    -- Take a Seat declines this because it re-issues a looping pose and a
+    -- second call restarts it visibly. FLOW is in the other camp for one
+    -- reason only: reissue() below checks animation.isPlaying first, so a
+    -- second delivery is a no-op whenever the pose survived. Should that guard
+    -- ever be removed, this opt-in has to go with it.
     I.AnimRefresh.subscribe("FLOW", function()
         if reissue then reissue() end
-    end)
+    end, { verify = true })
 end
 
 function Anim.setVariant(name)
@@ -349,6 +371,24 @@ local lastRequest = nil
 
 reissue = function()
     if not lastRequest then return end
+
+    -- IDEMPOTENCE. Required by AnimRefresh v4, not merely polite: v4 delivers
+    -- once shortly after subscribe() and twice after onLoad, so this WILL be
+    -- called when nothing was lost. Without the check below, entering a cell
+    -- while hanging from a ledge would restart the hang pose from frame 0, and
+    -- FLOW's `verify = true` opt-in would do the same a second later.
+    --
+    -- Tested against currentGroup, NOT against resolveGroup(lastRequest):
+    -- list-form entries (Vault, Mantle) pick a clip at random, so resolveGroup
+    -- can name a different clip than the one actually playing and we would
+    -- cancel a perfectly good pose to replay a sibling of it.
+    --
+    -- If the clip is gone, the rebuild really did drop it and we replay. A
+    -- one-shot that simply finished is not replayed either, because
+    -- onStateChange clears lastRequest as soon as a non-animating state is
+    -- entered - lastRequest being non-nil IS "an animating state is active".
+    if currentGroup and animation.isPlaying(self, currentGroup) then return end
+
     currentGroup = nil   -- force playGroup past its "already playing" guard
     playGroup(lastRequest.state, lastRequest.looping)
 end

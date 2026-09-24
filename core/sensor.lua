@@ -34,7 +34,41 @@ local util = require('openmw.util')
 local I = require('openmw.interfaces')
 local Settings = require('settings')
 
+-- =============================================================================
+-- HEIGHT BANDS
+--
+-- Which move an obstacle offers is decided by how tall it is RELATIVE TO THE
+-- PLAYER, so the three moves are expressed as fractions of player height and
+-- the unit values are derived. Hand-tuned unit constants were what put the
+-- spread of influence wrong in the first place: MIN_VAULT_HEIGHT sat at 25
+-- (under 20% of height - an ankle-high curb offered a vault) while
+-- MAX_MANTLE_HEIGHT sat at 110 (86% - a chest-high wall was already refused
+-- and handed to LedgeHang, which then would not catch it either).
+--
+--   Vault      30% - 55%    knee to waist
+--   Mantle     56% - 100%   waist to head      (floor is Vault's ceiling)
+--   LedgeHang  120% - 140%  overhead           (core/optional/sensor_ext.lua)
+--
+-- The bands are contiguous across the Vault/Mantle boundary by construction -
+-- VAULT_MAX_FRAC is the only thing separating them - but there is a DELIBERATE
+-- GAP between 100% and 120%: an obstacle in that window is too tall to climb
+-- onto from the ground and too low to hang from, and offering either move
+-- there looked wrong in play. Nothing fires. Close the gap by raising
+-- MANTLE_MAX_FRAC or lowering sensor_ext's GRAB_MIN_FRAC, not by adding a
+-- special case.
+--
+-- PLAYER_HEIGHT is the Morrowind biped's ~128 units, and the origin of a
+-- player local script's position is at the FEET, so every height in this file
+-- is measured up from there (LOW_SCAN_HEIGHT 25 is mid-shin, sensor_ext's
+-- WAIST_H 70 is the waist - both consistent with 128).
+local PLAYER_HEIGHT   = 128.0
+local VAULT_MIN_FRAC  = 0.30
+local VAULT_MAX_FRAC  = 0.55
+local MANTLE_MAX_FRAC = 1.00
+
 local Sensor = {
+    PLAYER_HEIGHT = PLAYER_HEIGHT,
+
     -- Detection reach (SharedRay is cast far beyond this; we just clip to it)
     BASE_REACH = 70,
     VELOCITY_FACTOR = 0.20,
@@ -52,9 +86,14 @@ local Sensor = {
 
     HEAD_CLEARANCE = 120,   -- raised alongside the bigger Vault apex: only offer the move
                             -- when there's genuinely room overhead for the new arc
-    MIN_VAULT_HEIGHT = 25,
-    MAX_HURDLE_HEIGHT = 60,
-    MAX_MANTLE_HEIGHT = 110,  -- above this, hand off to LedgeHang's own detection instead
+
+    -- Derived from the bands above. Do not edit these directly; edit the
+    -- fractions, or the three moves drift apart again.
+    MIN_VAULT_HEIGHT  = PLAYER_HEIGHT * VAULT_MIN_FRAC,   -- 38.4  - knee
+    MAX_HURDLE_HEIGHT = PLAYER_HEIGHT * VAULT_MAX_FRAC,   -- 70.4  - waist
+    MAX_MANTLE_HEIGHT = PLAYER_HEIGHT * MANTLE_MAX_FRAC,  -- 128.0 - head; above
+                                                          -- this, LedgeHang's own
+                                                          -- detection takes over
 
     VAULT_MAX_DEPTH = 170,  -- how far past the obstacle face to aim the landing
 
@@ -170,6 +209,19 @@ function Sensor.update(dt, inputIntents, syncData)
     Sensor.data.wallDist = 0
     Sensor.data.objHeight = 0
     Sensor.data.debugReason = ""
+
+    -- Nobody is listening. Vault and Mantle are this detector's only two
+    -- consumers, so with both switched off every ray below would be cast to
+    -- populate data no state is allowed to act on.
+    --
+    -- Placed AFTER the resets above, not before: the resets are what publish
+    -- "nothing detected", and skipping them would leave the last hit sitting in
+    -- Sensor.data for the debug HUD to keep reporting. This is the whole reason
+    -- the early-out lives here rather than at the call site in main.lua.
+    if not (Settings.stateEnabled("Vault") or Settings.stateEnabled("Mantle")) then
+        Sensor.data.debugReason = "Disabled"
+        return
+    end
 
     local pos = self.object.position
     local rot = self.object.rotation
@@ -341,12 +393,25 @@ function Sensor.update(dt, inputIntents, syncData)
     local sweepRes = nearby.castRay(sweepStart, candidateLandPos, SWEEP_RAY_OPTS)
     local isThick = sweepRes.hit
 
+    -- Vault is a waist-height move, and that is true however THIN the obstacle
+    -- is. This gate used to be missing from the branch below: a thin object
+    -- with a walkable landing behind it was vaulted at any height the top probe
+    -- would accept, so a chest-high railing got the same hurdle the thick
+    -- branch correctly refused at 60 units. Height first, geometry second.
+    local vaultHeight = relativeHeight <= Sensor.MAX_HURDLE_HEIGHT
+
     if not isThick and not isThinBeam then
         local navPos = nearby.findNearestNavMeshPosition(candidateLandPos, {
             searchAreaHalfExtents = util.vector3(50, 50, 50)
         })
 
-        if navPos then
+        if not vaultHeight then
+            -- In the Mantle band (56-100%). Climb onto it rather than over it,
+            -- even though there is somewhere to land on the far side.
+            Sensor.data.interaction = "Mantle"
+            Sensor.data.targetPos = topHit.hitPos
+            Sensor.data.debugReason = "Thin/High"
+        elseif navPos then
             if wallAngle < Sensor.MIN_VAULT_ANGLE then
                 Sensor.data.interaction = "Mantle"
                 Sensor.data.targetPos = topHit.hitPos
@@ -367,7 +432,7 @@ function Sensor.update(dt, inputIntents, syncData)
 
         if isThinBeam then
             Sensor.data.debugReason = "Beam" .. centerDebug
-        elseif relativeHeight > Sensor.MAX_HURDLE_HEIGHT then
+        elseif not vaultHeight then
             Sensor.data.debugReason = "Thick/High"
         else
             Sensor.data.interaction = "Vault"

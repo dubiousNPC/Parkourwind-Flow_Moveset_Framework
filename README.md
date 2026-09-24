@@ -3,14 +3,39 @@ A modular framework to animate and improve Morrowind's traversal gameplay
 
 ## Changes
 
-### AnimRefresh v2 → v3
+### AnimRefresh v3 → v4
 
-`AnimRefresh/AnimRefresh_v2.lua` is replaced by
-`scripts/AnimRefresh/AnimRefresh_v3.lua`, a byte-identical copy of the one
-Take a Seat and WhyWalk ship. v3 fixes the re-baseline hole that let v2 lose a
-perspective change when the engine finished rebuilding the model late (see the
-file header). The interface is unchanged, so FLOW's `subscribe("FLOW", ...)`
-call is untouched.
+`scripts/AnimRefresh/AnimRefresh_v4.lua` replaces the v3 copy. The filename
+carries the version on purpose: two mods shipping the same filename occupy one
+VFS path, so the version guard inside the file only helps once the names
+differ.
+
+What FLOW gets out of it:
+
+| | v3 | v4 |
+|---|---|---|
+| callbacks per POV press | 4 | 1, plus FLOW's opt-in verify pass |
+| idle → auto-vanity → back | 5 spurious callbacks | 0 |
+| refresh after Rest / Travel / Training / Jail | never | yes |
+| refresh after loading a save | never | yes |
+
+The auto-vanity row is the one that mattered in play. v3 fired on every hop
+between ThirdPerson, Preview and Vanity, none of which rebuild the model, so
+hanging from a ledge long enough to trigger vanity restarted the hang pose.
+
+Two things changed on FLOW's side of the interface.
+
+**`reissue()` is now idempotent.** v4 delivers once shortly after `subscribe()`
+and twice after `onLoad`, so the callback is called when nothing was lost.
+`reissue()` returns early if `animation.isPlaying` says the group it last asked
+for is still running. It deliberately tests the group actually in flight rather
+than re-resolving from `GROUPS`, because Vault and Mantle pick their clip at
+random and re-resolving could cancel a good pose to play a sibling of it.
+
+**FLOW passes `{ verify = true }`.** Take a Seat declines that option because a
+second delivery restarts its looping pose visibly. With the guard above, FLOW's
+second delivery is a no-op whenever the pose survived and a rescue when a late
+rebuild dropped it. The opt-in is only valid while that guard exists.
 
 The path matters as much as the version. At the old root-level path FLOW's
 copy was a separate script from everyone else's. At the shared path OpenMW

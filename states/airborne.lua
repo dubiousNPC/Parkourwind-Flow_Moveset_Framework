@@ -12,6 +12,7 @@ local RollState = require('states/roll')
 local InputManager = require('core/input')
 local VaultState = require('states/vault')
 local MantleState = require('states/mantle')
+local Settings = require('settings')
 
 local AirborneState = BaseState.new("Airborne")
 
@@ -131,6 +132,13 @@ input.registerTriggerHandler("Jump", async:callback(function()
     if core.isWorldPaused() then return end
     if not isActive or armed then return end
 
+    -- Arming has a side effect on the actor - a Fortify Agility that lasts
+    -- until touchdown - so this is checked here rather than relying on the
+    -- state manager refusing the Roll transition later. Refusing at the
+    -- transition would leave the fortify applied for the whole descent and
+    -- removed by exit() with no roll to show for it.
+    if not Settings.stateEnabled("Roll") then return end
+
     -- Forward must be held at the tap.
     if InputManager.intents.moveVector.y <= FORWARD_DEADZONE then return end
 
@@ -227,7 +235,19 @@ function AirborneState:update(dt, syncData, inputData)
             -- Requiring the lip to be above hand height means the grab can
             -- only ever pull the player UP, never yank them back down to a
             -- ledge they have already cleared.
-            local handsZ = mwSelf.position.z + SensorExt.GRAB_HEIGHT - LEDGE_GRAB_TOLERANCE
+            --
+            -- Measured against GRAB_MIN_HEIGHT, the floor of sensor_ext's catch
+            -- band, not against GRAB_HEIGHT. GRAB_HEIGHT is where the WALL ray
+            -- is cast, which sits deliberately below the band; reading it here
+            -- measured hands 10 units lower than they are and let the grab
+            -- reach very slightly downwards.
+            --
+            -- The band makes this check nearly redundant - updateLedgeHang runs
+            -- in the same tick from the same position and cannot report a lip
+            -- below its own floor. It is kept because it is two comparisons,
+            -- and because it is the only line that would notice if the band
+            -- floor were ever lowered past the point where a grab pulls down.
+            local handsZ = mwSelf.position.z + SensorExt.GRAB_MIN_HEIGHT - LEDGE_GRAB_TOLERANCE
             if SensorExt.data.targetPos.z > handsZ then
                 return "LedgeHang"
             end
