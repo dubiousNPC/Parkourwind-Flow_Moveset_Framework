@@ -2,11 +2,25 @@
 --[[
     core/engine_sync.lua
 
-    OpenMW exposes no velocity getter - types.Actor gives runSpeed/walkSpeed
-    (capability stats derived from the Speed attribute, NOT current motion)
-    and the isOnGround/isSwimming booleans, but nothing that answers "how
-    fast am I moving right now". This module synthesises what FLOW actually
-    consumes by differencing position across frames.
+    types.Actor gives runSpeed/walkSpeed - capability stats derived from the
+    Speed attribute, NOT current motion - so this module synthesises what FLOW
+    actually consumes by differencing position across frames.
+
+    CORRECTION, AND AN OPEN QUESTION. This header used to say OpenMW exposes no
+    velocity getter at all. That is wrong: types.Actor.getCurrentSpeed() exists,
+    in the official API and in the Cod3x annotations, with no context
+    restriction. It is not used here, and the differencing below is deliberately
+    unchanged, because its SEMANTICS could not be established - the entire
+    official description is "Current speed", and whether that means horizontal
+    or 3D, measured velocity or intended locomotion speed, decides both whether
+    the swap is safe and whether it is worth anything.
+
+    Do not "simplify" this module by dropping in getCurrentSpeed without
+    settling that first. If it includes the vertical component it silently
+    retunes the Vault/Mantle detection reach during any fall, via
+    core/sensor.lua's dynamicReach. See docs/velocity_getter_research.md - it
+    records what is known, the four-reading experiment that answers it, and the
+    five-file blast radius if the answer is favourable.
 
     Only what is consumed is computed. Removed over successive passes, each
     for the same reason - no reader:

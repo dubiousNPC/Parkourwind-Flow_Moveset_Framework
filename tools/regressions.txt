@@ -126,3 +126,16 @@ needs: getBoundingBox
 file: states/airborne.lua
 why: wallJumpUsed must NOT be cleared in enter(). WallJump exits back into Airborne, so clearing on entry re-arms the move at the top of every wall jump and gives an unlimited vertical climb. Touchdown clears it.
 needs: wallJumpUsed = false
+
+# NOTE ON WHAT CANNOT BE GUARDED HERE. This record first also carried
+# `needs: velocity_getter_research.md`, pointing at the doc that explains the
+# decision. It can never pass: that pointer lives in a comment in the file
+# header, and this checker strips comments before matching precisely so a
+# comment cannot satisfy a marker. The checker was right and the marker was
+# wrong - a decision recorded in prose is documentation, not something a
+# mechanical check can hold in place. Only the code-level guard below belongs
+# here. Don't re-add it.
+
+file: core/engine_sync.lua
+why: the differencing must NOT be swapped for types.Actor.getCurrentSpeed until its semantics are settled - if it includes the vertical component it silently retunes Vault/Mantle reach during any fall, arriving disguised as a performance change. See docs/velocity_getter_research.md before removing this marker.
+needs: not-present getCurrentSpeed(
