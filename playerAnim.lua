@@ -66,7 +66,6 @@ local Anim = {}
 -- =============================================================================
 local PRIORITY_FLOW       = animation.PRIORITY.Weapon
 local PRIORITY_FLOW_MAJOR = animation.PRIORITY.Block
-local PRIORITY_FLOW_FULL  = animation.PRIORITY.Storm
 
 local GROUPS = {
     -- List form: interchangeable clips for the same action. These are VISUAL
@@ -118,7 +117,7 @@ local GROUPS = {
     WallBoost = {
         variants = { left = "pwboostbkl", right = "pwboostbkr" },
         speed = 1,
-        priority = PRIORITY_FLOW_FULL,
+        priority = PRIORITY_FLOW_MAJOR,
         blendMask = animation.BLEND_MASK.All,
         startKey = "start",
         stopKey = "stop",
@@ -126,7 +125,25 @@ local GROUPS = {
 
     Roll      = {
         group = "pwroll1", speed = 1,  -- one-shot landing roll
-        priority = PRIORITY_FLOW_FULL,
+        priority = PRIORITY_FLOW_MAJOR,
+        blendMask = animation.BLEND_MASK.All,
+        startKey = "start",
+        stopKey = "stop",
+    },
+
+    -- Wall jump. Verified present in all three shipped sets - xParkourwind1.kf,
+    -- xParkourwind1.1st.kf and xParkourwind1kna.kf - as pwwalljump1 AND
+    -- pwwalljump2. Only the first is used; the second is available if this ever
+    -- wants list-form variation like Vault and Mantle have.
+    --
+    -- THE DIGIT IS THE WHOLE STORY OF THE OLD BUG. The removed WallJump named
+    -- its group "pwwalljump", which exists in none of the sets, and the
+    -- full-body blend mask below then masked out vanilla's animation with
+    -- nothing to replace it. That is the T-pose, and it was never a problem
+    -- with the state's logic.
+    WallJump  = {
+        group = "pwwalljump1", speed = 1,
+        priority = PRIORITY_FLOW_MAJOR,
         blendMask = animation.BLEND_MASK.All,
         startKey = "start",
         stopKey = "stop",
@@ -146,7 +163,7 @@ local GROUPS = {
 -- exactly what the removed WallJump entry ("pwwalljump") was doing.
 local LOOPING_STATES = { LedgeHang = true, Ladder = true }
 local ONE_SHOT_STATES = { Vault = true, Mantle = true, Roll = true,
-                          Shimmy = true, WallBoost = true }
+                          Shimmy = true, WallBoost = true, WallJump = true }
 
 local FULLBODY_PRIORITY = {
     [animation.BONE_GROUP.RightArm] = animation.PRIORITY.Jump,

@@ -26,11 +26,14 @@ local RollState = require('states/roll')
 local LadderState = require('states/ladder')
 local ShimmyState = require('states/shimmy')
 local WallBoostState = require('states/wall_boost')
--- WallJump has been removed entirely - it never worked as intended and
--- was the source of the repeating on-screen message and the T-pose (its
--- configured animation group had no matching clip, and its one-shot
--- playBlended masked out vanilla's own animation with nothing to
--- replace it).
+local WallJumpState = require('states/wall_jump')
+-- WallJump is BACK, rebuilt. The old one was removed for a fixed
+-- teleport-lerp toward a spawned platform mesh, a per-tick collision cage
+-- that clamped the move to zero against the wall the player was flush
+-- against, and an animation group name with no matching clip (the T-pose).
+-- None of those remain: states/wall_jump.lua runs on the same ballistic
+-- FLOW_Boost_Start integrator WallBoost uses, spawns nothing, and names
+-- pwwalljump1, which is present in all three shipped .kf sets.
 -- WallRun is optional and not loaded by default.
 -- See states/optional/README.md to bring it back.
 
@@ -43,7 +46,8 @@ local REGISTERED_STATES = {
     RollState,
     LadderState,
     ShimmyState,
-    WallBoostState
+    WallBoostState,
+    WallJumpState
 }
 
 -- =================================================================
@@ -90,9 +94,17 @@ local idleTick = H3.every(IDLE_THROTTLE_INTERVAL)
 -- state left without its exit() running leaves the jump key dead until some
 -- later state happens to clear it. Asserting the correct value from one place
 -- costs two boolean writes and makes the fault unable to outlive a tick.
+-- Roll and WallJump were added here with the features themselves. Both hold a
+-- movement override for a reason that is load-bearing rather than incidental:
+-- Roll uses it to take the jump key away and to drive the player forward, and
+-- WallJump uses it so input cannot fight the launch. A state holding an
+-- override without being listed here has it released on the very next tick by
+-- the safety net below, which would leave the roll jumpable and stationary and
+-- would be silent - the failure looks like the feature simply not working.
 local OVERRIDE_STATES = {
     Vault = true, Mantle = true, LedgeHang = true,
     Shimmy = true, WallBoost = true, Ladder = true,
+    Roll = true, WallJump = true,
 }
 
 local function onInit()

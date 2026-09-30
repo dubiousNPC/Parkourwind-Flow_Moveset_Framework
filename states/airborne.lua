@@ -6,6 +6,8 @@ local input = require('openmw.input')
 local async = require('openmw.async')
 local types = require('openmw.types')
 local mwSelf = require('openmw.self')
+local nearby = require('openmw.nearby')
+local util = require('openmw.util')
 local Sensor = require('core/sensor')
 local SensorExt = require('core/optional/sensor_ext')
 local RollState = require('states/roll')
@@ -66,11 +68,55 @@ local LEDGE_GRAB_TOLERANCE = 20
 -- surfAnimations' deadzone treatment of pself.controls.movement.
 local FORWARD_DEADZONE = 0.1
 
+-- =============================================================================
+-- ROLL FALL GATE
+--
+-- A roll now needs a real fall behind it. Below this, a tap arms nothing, so
+-- hopping on the spot or clearing a step cannot produce a landing roll.
+--
+-- Measured as time AIRBORNE, not time descending. "One second falling" is the
+-- requirement, and airborne time is the honest way to meet it: descent time
+-- would need a vertical velocity, which engine_sync deliberately no longer
+-- computes (its 3-frame smoothing buffer was removed when the LedgeHang gate
+-- stopped needing it), and re-adding a smoothed velocity to answer a threshold
+-- question would undo that. A jump that has been in the air a second has
+-- always either peaked or never left the ground far.
+local ROLL_MIN_AIR_TIME = 1.0
+
+-- =============================================================================
+-- WALL JUMP WINDOW AND REACH
+--
+-- The second jump has to come SOON after the first, which is what makes this a
+-- double-jump off a wall rather than a free mid-fall boost available at any
+-- height. It also separates this gesture from the Roll's cleanly: a wall jump
+-- is only offered in the first WALL_JUMP_WINDOW seconds airborne and the Roll
+-- only after ROLL_MIN_AIR_TIME, so one tap can never satisfy both and no
+-- priority rule between them is needed.
+local WALL_JUMP_WINDOW = 0.45
+
+-- Extra reach past the player's own half-width when testing for wall contact.
+-- Small on purpose: "in contact with the wall" should mean touching it, and a
+-- generous reach lets the player jump off a wall they are visibly clear of.
+local WALL_CONTACT_MARGIN = 14.0
+
+-- Height up the body to cast from. Torso, so a knee-high crate is not a wall
+-- and a chest-high railing is.
+local WALL_CONTACT_HEIGHT = 70.0
+
 local armed = false
-local armTimer = 0
+local timeAirborne = 0          -- seconds since this airborne period began;
+                                 -- gates both the Roll and the WallJump
+local wallJumpUsed = false      -- one wall jump per airborne period. NOT reset
+                                 -- in enter(): WallJump hands back to Airborne,
+                                 -- which would re-enter this state and re-arm
+                                 -- the move, giving an unlimited wall climb.
+                                 -- Cleared on touchdown instead.
 local isActive = false          -- is Airborne the current state? gates the
                                  -- module-scope trigger handler, which fires
                                  -- regardless of which state is running
+local wallJumpRequested = false -- set by the trigger handler, consumed by
+                                 -- update(). A handler cannot return a state
+                                 -- name; only update() can.
 local agilityApplied = false
 
 -- NOTE: activeEffects:modify() on a fortify effect is cosmetic on its own -
@@ -92,6 +138,68 @@ local function applyAgility(enable)
     end
 
     agilityApplied = enable
+end
+
+-- =============================================================================
+-- WALL CONTACT
+--
+-- Called ONLY from the Jump trigger handler, never per frame. That is the whole
+-- performance argument for this feature: wall detection is a question you only
+-- need answered at the instant the player asks for a wall jump, so there is no
+-- per-frame side-scan and no always-on sensor to pay for. The cost while
+-- airborne stays what it was - a couple of additions.
+--
+-- Acrobatics Expansion answers the same question with eight rays fanned across
+-- the WORLD axes at a fixed height and a flat 50-unit reach. Four
+-- player-relative rays with an early return is strictly less work for a better
+-- answer: forward is tested first because a player who just jumped into a wall
+-- is almost always facing it, so the common case costs ONE ray, and the reach
+-- is derived from the actor's own width rather than a constant that is too
+-- generous for a Bosmer and too tight for a Nord.
+--
+-- getBoundingBox() is the idea worth taking from that mod. It returns the real
+-- axis-aligned box in world coordinates, so halfSize.x is this character's
+-- actual half-width - beast races, scaled bodies and any future body mod all
+-- come out right without a table of per-race numbers.
+local WALL_RAY_OPTS = {
+    ignore = mwSelf,
+    collisionType = nearby.COLLISION_TYPE.World + nearby.COLLISION_TYPE.Door
+                    + nearby.COLLISION_TYPE.HeightMap
+}
+
+local function wallContact()
+    local box = mwSelf:getBoundingBox()
+    -- halfSize.x and .y are equal for an upright capsule; max() is defence
+    -- against a box that is not, at the cost of one comparison.
+    local halfWidth = math.max(box.halfSize.x, box.halfSize.y)
+    local reach = halfWidth + WALL_CONTACT_MARGIN
+
+    local pos = mwSelf.position
+    local origin = util.vector3(pos.x, pos.y, pos.z + WALL_CONTACT_HEIGHT)
+
+    local yaw = mwSelf.rotation:getYaw()
+    local fwd = util.transform.rotateZ(yaw):apply(util.vector3(0, 1, 0))
+    local right = util.vector3(-fwd.y, fwd.x, 0)
+
+    -- Forward, then the two sides, then behind. Ordered by likelihood so the
+    -- early return does the most good.
+    for i = 1, 4 do
+        local dir
+        if i == 1 then dir = fwd
+        elseif i == 2 then dir = right
+        elseif i == 3 then dir = -right
+        else dir = -fwd end
+
+        local res = nearby.castRay(origin, origin + dir * reach, WALL_RAY_OPTS)
+        -- A walkable surface is a floor or a ramp, not a wall. Same slope
+        -- threshold core/sensor.lua uses to qualify a vaultable face, so the
+        -- two detectors agree about what counts as vertical.
+        if res.hit and res.hitNormal and res.hitNormal.z < Sensor.WALKABLE_SLOPE_Z then
+            return true
+        end
+    end
+
+    return false
 end
 
 -- =============================================================================
@@ -130,7 +238,24 @@ input.registerTriggerHandler("Jump", async:callback(function()
     -- invocation and the roll could never arm. This one missing pair of
     -- brackets accounted for the entire "Roll never fires" symptom.
     if core.isWorldPaused() then return end
-    if not isActive or armed then return end
+    if not isActive then return end
+
+    -- WALL JUMP, first. The two gestures are separated by time rather than by
+    -- priority - this branch can only fire inside WALL_JUMP_WINDOW and the Roll
+    -- only after ROLL_MIN_AIR_TIME - so the order here is presentation, not a
+    -- tie-break. The raycast is last in the chain deliberately: every cheap
+    -- reason to refuse is checked before anything is cast.
+    if not wallJumpUsed
+       and not wallJumpRequested
+       and timeAirborne <= WALL_JUMP_WINDOW
+       and Settings.stateEnabled("WallJump")
+       and wallContact() then
+        wallJumpUsed = true
+        wallJumpRequested = true
+        return
+    end
+
+    if armed then return end
 
     -- Arming has a side effect on the actor - a Fortify Agility that lasts
     -- until touchdown - so this is checked here rather than relying on the
@@ -139,11 +264,14 @@ input.registerTriggerHandler("Jump", async:callback(function()
     -- removed by exit() with no roll to show for it.
     if not Settings.stateEnabled("Roll") then return end
 
+    -- A real fall has to be underway. This is the gate that stops a hop or a
+    -- single step down from offering a landing roll.
+    if timeAirborne < ROLL_MIN_AIR_TIME then return end
+
     -- Forward must be held at the tap.
     if InputManager.intents.moveVector.y <= FORWARD_DEADZONE then return end
 
     armed = true
-    armTimer = 0
     applyAgility(true)
 end))
 
@@ -185,11 +313,19 @@ end
 -- Only called when the debug HUD is on, so the string build costs nothing
 -- in a normal session.
 function AirborneState.getRollDebug()
+    -- Air time is shown on both branches because it is now the gate for both
+    -- moves: a wall jump is only offered below WALL_JUMP_WINDOW and a roll only
+    -- above ROLL_MIN_AIR_TIME, so "why did nothing happen" is almost always
+    -- answered by this number.
+    local wj = wallJumpUsed and " WJ-used"
+        or (timeAirborne <= WALL_JUMP_WINDOW and " WJ-ready" or "")
+
     if armed then
-        return string.format("ROLL: ARMED %.2f%s", armTimer,
-            landedSignal and " LANDKEY" or "")
+        return string.format("ROLL: ARMED air=%.2f%s%s", timeAirborne,
+            landedSignal and " LANDKEY" or "", wj)
     end
-    return string.format("ROLL: idle fwd=%.2f", InputManager.intents.moveVector.y)
+    return string.format("ROLL: idle air=%.2f fwd=%.2f%s", timeAirborne,
+        InputManager.intents.moveVector.y, wj)
 end
 
 -- Health sampled while still airborne, i.e. before the engine applies fall
@@ -202,8 +338,18 @@ function AirborneState:enter(syncData)
     healthBeforeLanding = types.Actor.stats.dynamic.health(mwSelf).current
     -- Fresh airborne period starts unarmed.
     armed = false
-    armTimer = 0
+    timeAirborne = 0
+    wallJumpRequested = false
     landedSignal = false
+
+    -- wallJumpUsed is deliberately NOT cleared here. WallJump exits back into
+    -- this state, so clearing it on entry would re-arm the move at the top of
+    -- every wall jump and turn the feature into an unlimited vertical climb.
+    -- Touchdown clears it - see update().
+    --
+    -- Resetting timeAirborne here does mean a wall jump restarts the Roll's
+    -- fall clock, which is correct: after the launch the player is falling from
+    -- a new apex, and that fall is the one the roll should be measured against.
 end
 
 -- Safety net: the Fortify is normally removed on landing or on timeout, but
@@ -216,6 +362,17 @@ function AirborneState:exit()
 end
 
 function AirborneState:update(dt, syncData, inputData)
+    timeAirborne = timeAirborne + dt
+
+    -- 0. Wall jump, decided in the trigger handler on the keypress. Consumed
+    -- before anything else so a wall jump is not lost to a Vault or a LedgeHang
+    -- that happens to be detected on the same frame - the player pressed jump
+    -- next to a wall and this is the move they asked for.
+    if wallJumpRequested then
+        wallJumpRequested = false
+        return "WallJump"
+    end
+
     -- 1. Obstacle Interaction (Mid-Air) - jump-gated, matching Idle
     if inputData.jump then
         if Sensor.data.interaction == "Vault" and not VaultState.isBlocked(Sensor.data.targetPos) then
@@ -267,19 +424,25 @@ function AirborneState:update(dt, syncData, inputData)
     -- little early - it can never pull the player out of the air into Idle.
     local touchedDown = syncData.isGrounded or (landedSignal and armed)
 
-    -- 1b. Airborne bookkeeping. Tap counting itself happens in the trigger
-    -- handler above, not here - this only tracks the pre-impact health
-    -- sample and ages the debug timer.
+    -- 1b. Airborne bookkeeping. Arming happens in the trigger handler above,
+    -- not here; this only keeps the pre-impact health sample fresh so
+    -- states/roll.lua can work out how much the engine took off.
+    --
+    -- The arm timer that used to be aged here is gone. It existed only to feed
+    -- the debug string, which now reports timeAirborne - the number that
+    -- actually gates both moves - so the old one was incrementing a value
+    -- nothing read.
     if not touchedDown then
         healthBeforeLanding = types.Actor.stats.dynamic.health(mwSelf).current
-        if armed then
-            armTimer = armTimer + dt   -- debug readout only; the arm never expires
-        end
     end
 
     -- 2. Landing Logic
     if touchedDown then
         landedSignal = false
+        -- Feet on the ground: the wall jump is available again. This is the
+        -- only place it is cleared, which is what makes it one per airborne
+        -- period rather than one per entry into this state.
+        wallJumpUsed = false
         if armed then
             applyAgility(false)
             armed = false

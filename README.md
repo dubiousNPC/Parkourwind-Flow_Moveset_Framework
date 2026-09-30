@@ -3,6 +3,55 @@ A modular framework to animate and improve Morrowind's traversal gameplay
 
 ## Changes
 
+### WallJump, rebuilt
+
+Jump into a wall, then press jump again within 0.45s while still touching it,
+for a boosted second jump straight up. `pwwalljump1`, one-shot. Acrobatics
+scales the apex and is fortified for the launch, alongside a `Jump` active
+effect so the boost reads correctly in the magic menu. Toggle: **Wall Jump**.
+
+The original was removed for three separate reasons, and none of them survive
+here:
+
+| old cause | now |
+|---|---|
+| fixed teleport-lerp toward a spawned platform mesh | ballistic `FLOW_Boost_Start`, nothing spawned |
+| per-tick collision cage clamped the move to zero against the wall | the boost path does no cage work at all |
+| animation group named `pwwalljump`, which does not exist | `pwwalljump1`, verified in all three shipped `.kf` sets |
+
+That third one was the T-pose: a full-body blend mask over a missing group
+leaves nothing driving the skeleton.
+
+**Cost when idle: nothing.** Wall contact is answered in the Jump trigger
+handler, so no ray is cast until the player actually asks for a wall jump, and
+the common case (facing the wall) costs one ray. The only per-frame addition
+anywhere is a single `timeAirborne` accumulator.
+
+One wall jump per airborne period, cleared on touchdown rather than on entering
+Airborne — WallJump exits back into Airborne, so clearing on entry would give an
+unlimited vertical climb.
+
+### Roll is now a committed action
+
+- **Needs a real fall.** One second airborne before a tap arms anything, so hops
+  and single steps down no longer offer a roll.
+- **Uninterruptible** except by knockdown, paralysis or death — one
+  `types.Actor.canMove()` call covers all three. The old "ground went away" bail
+  is gone, so rolling off a ledge finishes the roll.
+- **Always travels forward**, on the character's facing rather than the stick, at
+  run speed.
+- **Jump does nothing** for the duration.
+
+The last three are one mechanism: `overrideMovementControls(true)` suppresses
+jump *and* stops the engine writing `self.controls`, so the state drives movement
+itself. `Roll` is therefore in `main.lua`'s `OVERRIDE_STATES` — without that the
+per-tick safety net releases the override and the roll is silently jumpable and
+stationary.
+
+The fall gate and the wall-jump window also disambiguate the two gestures
+without a priority rule: a wall jump is only offered below 0.45s airborne and a
+roll only above 1.0s, so one tap can never satisfy both.
+
 ### AnimRefresh v3 → v4
 
 `scripts/AnimRefresh/AnimRefresh_v4.lua` replaces the v3 copy. The filename

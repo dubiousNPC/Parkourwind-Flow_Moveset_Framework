@@ -103,3 +103,26 @@ file: core/h3lp_compat.lua
 why: the soft dependency is tested with vfs.fileExists, not pcall(require). The pcall could not tell 'h3lp absent' from 'h3lp threw while loading', so a broken h3lp was silently replaced by FLOW's fallback with nothing printed.
 needs: vfs.fileExists
 needs: not-present pcall
+
+file: playerAnim.lua
+why: the WallJump animation group is pwwalljump1 WITH the digit. The removed WallJump named "pwwalljump", which exists in none of the three shipped .kf sets, and the full-body blend mask then masked out vanilla's animation with nothing to replace it - that was the T-pose.
+needs: pwwalljump1
+
+file: main.lua
+why: Roll and WallJump both hold a movement override that is load-bearing - Roll uses it to suppress jump and drive forward motion. A state holding an override without being listed in OVERRIDE_STATES has it released on the next tick by the safety net, silently, and the feature just looks broken.
+needs: Roll = true, WallJump = true
+
+file: states/roll.lua
+why: the roll is uninterruptible except by knockdown or death. types.Actor.canMove covers dead, paralyzed AND knocked down in one call; the old isGrounded bail-out cut the animation when rolling off a ledge and is deliberately gone.
+needs: types.Actor.canMove
+needs: not-present return "Airborne"
+
+file: states/airborne.lua
+why: WallJump detection is cast ONLY in the Jump trigger handler, never per frame. Its window and the Roll's minimum air time are what separate the two gestures, so one tap can never satisfy both.
+needs: WALL_JUMP_WINDOW
+needs: ROLL_MIN_AIR_TIME
+needs: getBoundingBox
+
+file: states/airborne.lua
+why: wallJumpUsed must NOT be cleared in enter(). WallJump exits back into Airborne, so clearing on entry re-arms the move at the top of every wall jump and gives an unlimited vertical climb. Touchdown clears it.
+needs: wallJumpUsed = false

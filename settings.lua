@@ -115,6 +115,12 @@ local statesOk = pcall(I.Settings.registerGroup, {
             default = true, renderer = "checkbox"
         },
         {
+            key = "stateWallJump",
+            name = "Wall Jump",
+            description = "Jump into a wall, then press jump again straight away for a boosted second jump upward. Turning this off also skips the wall-contact probe, which is only cast on the second jump press and never per frame.",
+            default = true, renderer = "checkbox"
+        },
+        {
             key = "stateRoll",
             name = "Landing Roll",
             description = "Tapping jump in mid-air near the ground to roll on landing, reducing fall damage. Turning this off also skips the ground-height probe that arming the roll would cast.",
@@ -188,6 +194,7 @@ local STATE_KEYS = {
     LedgeHang = "stateLedgeHang",
     Shimmy    = "stateShimmy",
     WallBoost = "stateWallBoost",
+    WallJump  = "stateWallJump",
     Roll      = "stateRoll",
     Ladder    = "stateLadder",
 }

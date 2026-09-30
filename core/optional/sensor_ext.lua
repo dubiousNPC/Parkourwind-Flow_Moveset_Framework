@@ -53,8 +53,8 @@ local Settings = require('settings')
 -- The 100% - 120% gap between this and Mantle is deliberate; see the band note
 -- in core/sensor.lua.
 local PLAYER_HEIGHT = 128.0
-local GRAB_MIN_FRAC = 1.00
-local GRAB_MAX_FRAC = 1.20
+local GRAB_MIN_FRAC = 1.20
+local GRAB_MAX_FRAC = 1.40
 
 local GRAB_MIN_HEIGHT = PLAYER_HEIGHT * GRAB_MIN_FRAC   -- 153.6
 local GRAB_MAX_HEIGHT = PLAYER_HEIGHT * GRAB_MAX_FRAC   -- 179.2
