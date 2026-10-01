@@ -1,73 +1,18 @@
 ---@omw-context player
---[[
-    core/sensor.lua (LITE)
-
-    Vault/Mantle obstacle detector. Primary detection is I.SharedRay - a
-    single shared, engine-amortized ray per frame - instead of casting our
-    own rays every frame. Because that ray follows the CAMERA, it reliably
-    misses low obstacles you're not looking directly at (a knee-height
-    curb, a fence rail) while running - exactly the "quickly pass low
-    obstacles" case this mod cares most about. So when SharedRay doesn't
-    find anything usable, we fall back to a small, narrow, SHORT-range scan
-    (3 rays: center + two close side offsets) cast from the player's own
-    body at knee height, in the player's own facing direction - not a
-    revival of the old 9-ray waist/shin double-fan, just enough to catch
-    "there's a low thing right in front of me" regardless of where the
-    camera's pointed. It only runs when SharedRay's single ray misses, so
-    worst case per frame is still "1 shared ray + up to 3 short own rays",
-    far below the original fan scan.
-
-    Beyond that: the handful of follow-up probes (top-surface height,
-    ceiling clearance, thin-beam centering, landing-clear sweep) run ONLY
-    once something's actually been detected, never continuously - unchanged
-    either way.
-
-    WallRun and LedgeHang detection used to live in this file (the SIDE
-    SCAN and LEDGE HANG FALLBACK sections). They've moved to
-    core/optional/sensor_ext.lua and are not loaded by default - see
-    states/optional/README.md.
-]]--
-
+-- Vault/Mantle obstacle detector. Primary probe is I.SharedRay.
 local nearby = require('openmw.nearby')
 local self = require('openmw.self')
 local util = require('openmw.util')
 local I = require('openmw.interfaces')
 local Settings = require('settings')
+local Body = require('core/body')
 
--- =============================================================================
--- HEIGHT BANDS
---
--- Which move an obstacle offers is decided by how tall it is RELATIVE TO THE
--- PLAYER, so the three moves are expressed as fractions of player height and
--- the unit values are derived. Hand-tuned unit constants were what put the
--- spread of influence wrong in the first place: MIN_VAULT_HEIGHT sat at 25
--- (under 20% of height - an ankle-high curb offered a vault) while
--- MAX_MANTLE_HEIGHT sat at 110 (86% - a chest-high wall was already refused
--- and handed to LedgeHang, which then would not catch it either).
---
---   Vault      30% - 55%    knee to waist
---   Mantle     56% - 100%   waist to head      (floor is Vault's ceiling)
---   LedgeHang  120% - 140%  overhead           (core/optional/sensor_ext.lua)
---
--- The bands are contiguous across the Vault/Mantle boundary by construction -
--- VAULT_MAX_FRAC is the only thing separating them - but there is a DELIBERATE
--- GAP between 100% and 120%: an obstacle in that window is too tall to climb
--- onto from the ground and too low to hang from, and offering either move
--- there looked wrong in play. Nothing fires. Close the gap by raising
--- MANTLE_MAX_FRAC or lowering sensor_ext's GRAB_MIN_FRAC, not by adding a
--- special case.
---
--- PLAYER_HEIGHT is the Morrowind biped's ~128 units, and the origin of a
--- player local script's position is at the FEET, so every height in this file
--- is measured up from there (LOW_SCAN_HEIGHT 25 is mid-shin, sensor_ext's
--- WAIST_H 70 is the waist - both consistent with 128).
-local PLAYER_HEIGHT   = 128.0
-local VAULT_MIN_FRAC  = 0.30
-local VAULT_MAX_FRAC  = 0.55
-local MANTLE_MAX_FRAC = 1.00
+-- Height bands: vault 25-50%, mantle 51-80%, walljump 80-110%, hang 110-130%.
+local VAULT_MIN_FRAC  = 0.25
+local VAULT_MAX_FRAC  = 0.50
+local MANTLE_MAX_FRAC = 0.80
 
 local Sensor = {
-    PLAYER_HEIGHT = PLAYER_HEIGHT,
 
     -- Detection reach (SharedRay is cast far beyond this; we just clip to it)
     BASE_REACH = 70,
@@ -86,14 +31,6 @@ local Sensor = {
 
     HEAD_CLEARANCE = 120,   -- raised alongside the bigger Vault apex: only offer the move
                             -- when there's genuinely room overhead for the new arc
-
-    -- Derived from the bands above. Do not edit these directly; edit the
-    -- fractions, or the three moves drift apart again.
-    MIN_VAULT_HEIGHT  = PLAYER_HEIGHT * VAULT_MIN_FRAC,   -- 38.4  - knee
-    MAX_HURDLE_HEIGHT = PLAYER_HEIGHT * VAULT_MAX_FRAC,   -- 70.4  - waist
-    MAX_MANTLE_HEIGHT = PLAYER_HEIGHT * MANTLE_MAX_FRAC,  -- 128.0 - head; above
-                                                          -- this, LedgeHang's own
-                                                          -- detection takes over
 
     VAULT_MAX_DEPTH = 170,  -- how far past the obstacle face to aim the landing
 
@@ -114,42 +51,28 @@ local Sensor = {
     lastKnownAngle = 0.0,
 }
 
+function Sensor.minVaultHeight()  return Body.frac(VAULT_MIN_FRAC)  end
+function Sensor.maxHurdleHeight() return Body.frac(VAULT_MAX_FRAC)  end
+function Sensor.maxMantleHeight() return Body.frac(MANTLE_MAX_FRAC) end
+
 local function getForwardVector(rot)
     local yaw = rot:getYaw()
     return util.transform.rotateZ(yaw):apply(util.vector3(0, 1, 0))
 end
 
--- =============================================================================
--- HOISTED CONSTANTS
---
--- These were previously rebuilt on every call, inside the hottest loop in
--- the mod: a fresh RAY_OPTS for each of the 7 castRay call
--- sites, plus the two offset lists. That's 9+ table allocations per sensor
--- update, every update, purely to hand the same constant data to the engine.
--- self.object is fixed for the lifetime of a player local script and
--- castRay only reads the options table, so a single shared table is safe.
--- =============================================================================
 local RAY_OPTS = { ignore = self.object }
 local LOW_SCAN_OFFSETS = { 0, Sensor.LOW_SCAN_SIDE_OFFSET, -Sensor.LOW_SCAN_SIDE_OFFSET }
 local PROBE_OFFSETS = { 10, 30 }
--- Landing sweep uses a thick (radius) cast and deliberately does NOT ignore
--- the player, so it needs its own options table.
 local SWEEP_RAY_OPTS = {
     radius = 15,
     collisionType = nearby.COLLISION_TYPE.World + nearby.COLLISION_TYPE.HeightMap
 }
 
--- Resolving an object's display name costs a pcall plus a record lookup, and
--- the ONLY consumer is Sensor.lastKnownObject, which is read solely by
--- getDebugString(). When the debug HUD is off, that work is pure waste on the
--- critical path - so skip it entirely.
 local function getObjectName(obj)
     if not Settings.debugMode() then return "" end
     if not obj then return "Terrain" end
     local name = nil
     if obj.type and obj.type.record then
-        -- No pcall: `obj.type and obj.type.record` above already establishes
-        -- the method exists for this object type - the only real failure mode.
         local record = obj.type.record(obj)
         if record then name = record.name end
     end
@@ -157,9 +80,6 @@ local function getObjectName(obj)
     return name
 end
 
--- Short, narrow, player-facing fallback for low obstacles the camera-aimed
--- SharedRay doesn't happen to be looking at. Only called when SharedRay
--- misses. Returns hitPos, hitNormal, distance, sourceLabel or nil.
 local function tryLowScan(pos, forward, maxReach)
     local reach = math.min(Sensor.LOW_SCAN_REACH, maxReach)
     if reach <= 0 then return nil end
@@ -179,19 +99,12 @@ local function tryLowScan(pos, forward, maxReach)
     return nil
 end
 
--- Call once (main.lua's onActive) so the shared cast is guaranteed to
--- reach at least our MAX_REACH, regardless of what any other SharedRay
--- consumer requests.
 function Sensor.registerSharedRay()
     if not I.SharedRay then
         print("[FLOW:Sensor] I.SharedRay not found - make sure SharedRay is bundled and registered in the omwscripts file.")
         return
     end
 
-    -- Same shape hazard as the accessor in update(): the interface existing
-    -- says nothing about which copy won or what it exposes. Report once and
-    -- carry on - a missing requestDistance costs reach, not correctness,
-    -- because update() re-checks every hit against dynamicReach anyway.
     if not I.SharedRay.requestDistance then
         print("[FLOW:Sensor] The SharedRay copy that claimed the interface has no " ..
               "requestDistance (version " .. tostring(I.SharedRay.version) ..
@@ -210,14 +123,6 @@ function Sensor.update(dt, inputIntents, syncData)
     Sensor.data.objHeight = 0
     Sensor.data.debugReason = ""
 
-    -- Nobody is listening. Vault and Mantle are this detector's only two
-    -- consumers, so with both switched off every ray below would be cast to
-    -- populate data no state is allowed to act on.
-    --
-    -- Placed AFTER the resets above, not before: the resets are what publish
-    -- "nothing detected", and skipping them would leave the last hit sitting in
-    -- Sensor.data for the debug HUD to keep reporting. This is the whole reason
-    -- the early-out lives here rather than at the call site in main.lua.
     if not (Settings.stateEnabled("Vault") or Settings.stateEnabled("Mantle")) then
         Sensor.data.debugReason = "Disabled"
         return
@@ -232,41 +137,12 @@ function Sensor.update(dt, inputIntents, syncData)
 
     local wallPos, wallNormal, wallDist, source
 
-    -- Primary: SharedRay (camera-aimed, free/shared)
-    --
-    -- [COMPAT] Resolve the ACCESSOR, not just the interface. A version number
-    -- guards against an OLDER copy winning; it does NOT describe the interface
-    -- SHAPE. Several mods bundle a file called sharedray_v2 and each declares
-    -- MY_VERSION = 2, so whichever loads FIRST claims the interface and every
-    -- later copy - including FLOW's - sees `version >= MY_VERSION` and bails.
-    -- If the winner is a v2 without getUnclipped, `if I.SharedRay then` passes
-    -- and the call is nil:
-    --     core/sensor.lua:174: attempt to call field 'getUnclipped' (a nil value)
-    -- thrown inside onUpdate, so it took the whole tick down every frame.
-    --
-    -- FLOW cannot control which copy wins, so it asks for what it needs and
-    -- degrades to the knee-height scan below when the answer is no.
     local rayGet = I.SharedRay and (I.SharedRay.getUnclipped or I.SharedRay.get)
     if rayGet then
-        -- SharedRay results are a live view owned by SharedRay - read what
-        -- we need immediately, never hold onto the table itself.
         local ray = rayGet()
         if ray and ray.hit and ray.hitPos and ray.hitNormal
            and ray.hitNormal.z < Sensor.WALKABLE_SLOPE_Z then
 
-            -- Derive the distance rather than reading ray.distance.
-            --
-            -- [COMPAT, round two] The previous line compared ray.distance
-            -- directly and threw "attempt to compare nil with number" 1604
-            -- times in one session: the SharedRay copy that won the interface
-            -- reports a hit WITHOUT a distance field. That is the same root
-            -- cause as the getUnclipped crash - the interface shape is not
-            -- guaranteed - and fixing only the accessor moved the failure one
-            -- line down instead of removing it.
-            --
-            -- hitPos is the one field every copy provides, since it is the
-            -- point of the call. Measuring from it needs nothing optional and
-            -- cannot disagree with whatever the winning copy chose to report.
             local dist = ray.distance
             if type(dist) ~= "number" then
                 dist = (ray.hitPos - self.object.position):length()
@@ -279,8 +155,6 @@ function Sensor.update(dt, inputIntents, syncData)
         end
     end
 
-    -- Fallback: knee-height scan from the player's own body (only spent
-    -- when SharedRay didn't find anything usable)
     if not wallPos then
         wallPos, wallNormal, wallDist, source = tryLowScan(pos, forward, dynamicReach)
     end
@@ -305,10 +179,6 @@ function Sensor.update(dt, inputIntents, syncData)
 
     local wallAngle = math.deg(math.acos(wallNormal.z))
 
-    -- =================================================================
-    -- TOP SURFACE PROBE (unchanged 2-pass strategy: normal depth, then a
-    -- shallow "thin beam" retry if the first pass found nothing to stand on)
-    -- =================================================================
     local topHit = nil
     local isThinBeam = false
 
@@ -316,7 +186,7 @@ function Sensor.update(dt, inputIntents, syncData)
         local depth = PROBE_OFFSETS[i]
         local probeOrigin = wallPos + (intoWall * depth)
         local topOrigin = util.vector3(probeOrigin.x, probeOrigin.y, pos.z + 230)
-        local topDest = util.vector3(probeOrigin.x, probeOrigin.y, pos.z + Sensor.MIN_VAULT_HEIGHT)
+        local topDest = util.vector3(probeOrigin.x, probeOrigin.y, pos.z + Sensor.minVaultHeight())
         topHit = nearby.castRay(topOrigin, topDest, RAY_OPTS)
         if topHit.hit then break end
     end
@@ -324,7 +194,7 @@ function Sensor.update(dt, inputIntents, syncData)
     if not topHit or not topHit.hit then
         local microOrigin = wallPos + (intoWall * Sensor.BEAM_PROBE_DEPTH)
         local topOrigin = util.vector3(microOrigin.x, microOrigin.y, pos.z + 230)
-        local topDest = util.vector3(microOrigin.x, microOrigin.y, pos.z + Sensor.MIN_VAULT_HEIGHT)
+        local topDest = util.vector3(microOrigin.x, microOrigin.y, pos.z + Sensor.minVaultHeight())
         topHit = nearby.castRay(topOrigin, topDest, RAY_OPTS)
         if topHit.hit then isThinBeam = true end
     end
@@ -338,7 +208,7 @@ function Sensor.update(dt, inputIntents, syncData)
     local relativeHeight = surfaceZ - pos.z
     Sensor.data.objHeight = relativeHeight
 
-    if relativeHeight < Sensor.MIN_VAULT_HEIGHT then
+    if relativeHeight < Sensor.minVaultHeight() then
         Sensor.data.debugReason = "Too Low"
         return
     end
@@ -349,18 +219,11 @@ function Sensor.update(dt, inputIntents, syncData)
         return
     end
 
-    -- Anything tall enough to need LedgeHang is skipped here rather than
-    -- force-mantled - LedgeHang has its own separate detection pipeline
-    -- (core/optional/sensor_ext.lua's updateLedgeHang, called from
-    -- states/airborne.lua) that picks up where this leaves off.
-    if relativeHeight > Sensor.MAX_MANTLE_HEIGHT then
+    if relativeHeight > Sensor.maxMantleHeight() then
         Sensor.data.debugReason = "Too High (see LedgeHang)"
         return
     end
 
-    -- =================================================================
-    -- CENTER ADJUSTMENT (thin beams only)
-    -- =================================================================
     local adjustedTargetPos = topHit.hitPos
     local centerDebug = ""
 
@@ -383,9 +246,6 @@ function Sensor.update(dt, inputIntents, syncData)
         end
     end
 
-    -- =================================================================
-    -- VAULT vs MANTLE
-    -- =================================================================
     local rawLanding = wallPos + (intoWall * Sensor.VAULT_MAX_DEPTH)
     local candidateLandPos = util.vector3(rawLanding.x, rawLanding.y, pos.z)
 
@@ -393,12 +253,7 @@ function Sensor.update(dt, inputIntents, syncData)
     local sweepRes = nearby.castRay(sweepStart, candidateLandPos, SWEEP_RAY_OPTS)
     local isThick = sweepRes.hit
 
-    -- Vault is a waist-height move, and that is true however THIN the obstacle
-    -- is. This gate used to be missing from the branch below: a thin object
-    -- with a walkable landing behind it was vaulted at any height the top probe
-    -- would accept, so a chest-high railing got the same hurdle the thick
-    -- branch correctly refused at 60 units. Height first, geometry second.
-    local vaultHeight = relativeHeight <= Sensor.MAX_HURDLE_HEIGHT
+    local vaultHeight = relativeHeight <= Sensor.maxHurdleHeight()
 
     if not isThick and not isThinBeam then
         local navPos = nearby.findNearestNavMeshPosition(candidateLandPos, {
@@ -406,8 +261,6 @@ function Sensor.update(dt, inputIntents, syncData)
         })
 
         if not vaultHeight then
-            -- In the Mantle band (56-100%). Climb onto it rather than over it,
-            -- even though there is somewhere to land on the far side.
             Sensor.data.interaction = "Mantle"
             Sensor.data.targetPos = topHit.hitPos
             Sensor.data.debugReason = "Thin/High"

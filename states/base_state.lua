@@ -1,5 +1,5 @@
 ---@omw-context player
---- START OF FILE states/base_state.lua ---
+-- State interface. Every state inherits enter/exit/update.
 
 local BaseState = {}
 BaseState.__index = BaseState
@@ -15,10 +15,6 @@ end
 
 -- Interface Methods (Defaults)
 
--- Checks if we can transition INTO this state
--- @param dt: Delta time
--- @param syncData: The read-only data table from EngineSync
--- @param inputData: The input table (Phase 2)
 function BaseState:canEnter(dt, syncData, inputData)
     return false
 end
@@ -33,8 +29,6 @@ function BaseState:exit()
     -- Cleanup
 end
 
--- Called every frame while active
--- Return a string (State Name) to request a transition, or nil to stay
 function BaseState:update(dt, syncData, inputData)
     return nil
 end

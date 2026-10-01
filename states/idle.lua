@@ -26,11 +26,6 @@ function IdleState:update(dt, syncData, inputData)
         end
     end
 
-    -- 3. To Sprint (was missing entirely - Sprint was unreachable from a
-    -- standing start; this is the actual entry point for the mod's
-    -- "hold key to sprint, run at obstacle" flow). Gated on the same
-    -- fatigue threshold Sprint's own update() checks, so this doesn't
-    -- hand off into a state that immediately bounces back.
     if inputData.sprint and inputData.moveVector.y > 0 then
         local fat = types.Actor.stats.dynamic.fatigue(mwSelf).current
         if fat > 0 then
@@ -38,9 +33,6 @@ function IdleState:update(dt, syncData, inputData)
         end
     end
 
-    -- Ladder: forward into a recognised ladder static. Probed only on forward
-    -- input, so the extra ray costs nothing while standing still or running
-    -- past one.
     if inputData.moveVector.y > 0.1 then
         local lp, ln = LadderState.probe()
         if lp then

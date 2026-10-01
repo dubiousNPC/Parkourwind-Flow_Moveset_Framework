@@ -1,4 +1,5 @@
 ---@omw-context player
+-- Mantle. Climbs onto a waist-to-head surface.
 local BaseState = require('states/base_state')
 local types = require('openmw.types')
 local mwSelf = require('openmw.self')
@@ -14,9 +15,6 @@ local EngineSync = require('core/engine_sync')
 
 local MantleState = BaseState.new("Mantle")
 
--- Destination-validation probes. Hoisted to module scope: rebuilding an
--- identical options table on every entry is the allocation pattern RESEARCH
--- 1.20 flags, and mwSelf is fixed for the life of a player script.
 local DEST_HEAD_PROBE = 60.0
 local DEST_FLOOR_PROBE = 200.0
 local DEST_FLOOR_TOLERANCE = 60.0
@@ -30,8 +28,6 @@ local MIN_DURATION = 0.35
 local CLIMB_SPEED_UNITS_PER_SEC = 200.0 -- Adjust speed scaling
 local LANDING_BUFFER = 35.0
 local LEDGE_PUSH_IN = 45.0   -- how far PAST the detected ledge edge to finish, so the
-                             -- player ends up standing solidly on top instead of
-                             -- teetering on the lip where the surface probe hit
 local TIMEOUT_MAX = 2.0
 
 -- Camera "Heave" Config
@@ -58,25 +54,6 @@ end
 
 -- State Interface
 
--- Set by states/ledge_hang.lua before it hands over. A climb out of a hang has
--- ALREADY had its ledge validated - SensorExt found the lip, the grab snapped
--- to it, and the player has been hanging from it. Re-running the destination
--- probes there is not a second opinion, it is a different and stricter test on
--- geometry that is known good: targetPos sits LEDGE_PUSH_IN past the edge and
--- LANDING_BUFFER above it, so a low ceiling or a narrow top refuses a climb the
--- player can plainly see is possible. That refusal is why jumping from a hang
--- did nothing.
--- Refusal suppression, matching vault.lua's.
---
--- [RESPONSIVENESS FIX] Mantle had NONE. A refused Mantle was re-entered on the
--- very next frame off the same unchanged sensor data and refused again,
--- indefinitely. Airborne's update does not run on a frame where Mantle is the
--- active state, so that thrash was stealing every other frame from the Vault,
--- LedgeHang and Roll checks that live there - which is why Vault went sluggish
--- too, and why it was worst in the air.
---
--- Target-aware, as in vault.lua: only the refused candidate is suppressed, so
--- moving to a different target retries immediately.
 local BLOCK_DURATION = 0.35
 local BLOCK_RETRY_RADIUS = 40.0
 local blockedUntil = 0
@@ -101,13 +78,7 @@ function MantleState.vouchDestination()
 end
 
 function MantleState:enter(syncData)
-    -- Cleared first: state_manager reads this immediately after enter() to
-    -- decide whether to announce and animate, so a stale true from a previous
-    -- refusal must not leak into a successful entry.
     self.abort = false
-    -- Sanity check: only enter if the Sensor actually flagged Mantle.
-    -- (If you re-enable states/optional/ledge_hang.lua later, add back:
-    --  `or Sensor.data.interaction == "LedgeHang"` to allow climbing up from a hang.)
     if Sensor.data.interaction ~= "Mantle" then
         if Settings.debugMode() then
             print("[FLOW][mantle] refused: no Mantle target from sensor")
@@ -135,31 +106,17 @@ function MantleState:enter(syncData)
         return
     end
     
-    -- "High Step" Logic: Ensure we land slightly above the surface to prevent floor clipping,
-    -- and carry forward past the lip so the move actually deposits the player
-    -- on the surface rather than teetering on its very edge.
-    --
-    -- Push direction is taken from the player->ledge vector rather than a
-    -- hand-rolled facing vector: that's correct regardless of which yaw
-    -- sign convention applies, and it's guaranteed to point AT the ledge
-    -- (a sign error here would shove the player backwards off it).
     local toLedge = rawLedge - startPos
     local pushDir = util.vector3(toLedge.x, toLedge.y, 0)
     if pushDir:length() > 1.0 then
         pushDir = pushDir:normalize()
     else
-        -- Ledge is directly overhead (straight-up climb) - fall back to
-        -- the player's own facing, matching core/sensor.lua's convention.
         local yaw = mwSelf.rotation:getYaw()
         pushDir = util.transform.rotateZ(yaw):apply(util.vector3(0, 1, 0))
     end
 
     targetPos = rawLedge + util.vector3(0, 0, LANDING_BUFFER) + pushDir * LEDGE_PUSH_IN
     
-    -- Validate Height. Routed through refuse() because this one IS reachable
-    -- with the sensor still reporting Mantle - without suppression it re-enters
-    -- and re-refuses every frame. Target-aware, so climbing to a different
-    -- ledge retries at once.
     if targetPos.z <= startPos.z then
         if Settings.debugMode() then
             print("[FLOW][mantle] refused: target at or below start height")
@@ -168,12 +125,6 @@ function MantleState:enter(syncData)
         return
     end
     
-    -- 1. Calculate Duration based on Height
-    -- [SAFETY] Destination validation, same rationale as vault.lua's: the
-    -- checks above vet the obstacle, nothing vetted where the player ends up.
-    -- At the outer edge of sensor range the target is furthest from what
-    -- approved it, and indoors a bad target sits on the far side of a wall -
-    -- which is how a mantle turns into a clip-through and a fall.
     local DEST_HEAD_PROBE = 90.0
     local DEST_FLOOR_PROBE = 200.0
     local DEST_FLOOR_TOLERANCE = 60.0
@@ -217,13 +168,6 @@ function MantleState:enter(syncData)
     startPitch = camera.getPitch()
     startRoll = camera.getRoll()
     
-    -- Animation is owned entirely by playerAnim.lua now (called right
-    -- after this enter() returns, via state_manager.lua's setState choke
-    -- point) - this used to call anim.playBlended('jump', ...) directly,
-    -- which raced with playerAnim.lua's own attempt to play whatever's
-    -- configured for "Mantle" and silently won or lost depending on
-    -- priority. See playerAnim.lua's GROUPS.Mantle entry for the tuning
-    -- (speed, priority, blendMask) that used to live here.
     
     -- 4. Execute
     core.sendGlobalEvent('FLOW_Mantle_Start', {
@@ -272,15 +216,7 @@ function MantleState:update(dt, syncData, inputData)
         camera.setExtraRoll(extraRoll)
     end
 
-    -- 2. Exit Conditions
-    -- Same race as Vault: let the global tween land the move before this
-    -- side exits and cancels it. Mantle is even more exposed - a
-    -- truncated phase 2 leaves the player floating at the wall face
-    -- instead of on top of the ledge.
     if timeInState >= totalDuration + 0.06 then
-        -- Momentum preservation: holding forward hands back to Sprint,
-        -- which immediately bounces to Idle on its own if the sprint key
-        -- isn't actually held - see states/sprint.lua.
         if inputData.moveVector.y > 0 then
             return "Idle"
         else

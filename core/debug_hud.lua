@@ -1,5 +1,5 @@
 ---@omw-context player
---- START OF FILE core/debug_hud.lua ---
+-- Debug HUD. Created lazily, only while the setting is on.
 
 local ui = require('openmw.ui')
 local util = require('openmw.util')
@@ -16,10 +16,6 @@ local DebugHUD = {
 }
 
 function DebugHUD.create()
-    -- Gate lives HERE, not just in main.lua's onUpdate: states/vault.lua,
-    -- states/mantle.lua and states/ledge_hang.lua all call DebugHUD.update()
-    -- directly on entry, which would otherwise spawn (and permanently strand)
-    -- the HUD even with the debug setting off.
     if not Settings.debugMode() then return end
     if DebugHUD.element then return end
 
@@ -67,11 +63,6 @@ function DebugHUD.create()
     })
 end
 
--- element:update() is a full UI layout redraw crossing the Lua/engine
--- boundary - by a wide margin the most expensive thing FLOW does per frame
--- when the HUD is on. Cache the last strings written and only redraw when
--- something actually changed; a state/sensor readout is static for most
--- consecutive frames, so this skips the large majority of redraws.
 function DebugHUD.update(stateName, sensorInfo, actionName)
     if not Settings.debugMode() then return end
     if not DebugHUD.element then DebugHUD.create() end
@@ -108,12 +99,8 @@ function DebugHUD.update(stateName, sensorInfo, actionName)
     end
 end
 
--- Called when the debug setting is turned off, so the HUD doesn't linger
--- on screen after being disabled mid-session.
 function DebugHUD.destroy()
     if not DebugHUD.element then return end
-    -- Defensive: destroy() on a UI Element is the documented teardown, but
-    -- guard anyway so a missing binding can't error out the frame.
     if DebugHUD.element.destroy then
         DebugHUD.element:destroy()
     end

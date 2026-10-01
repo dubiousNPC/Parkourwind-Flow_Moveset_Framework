@@ -1,4 +1,5 @@
 ---@omw-context player
+-- FSM. Single choke point for transitions and animation.
 local ui = require('openmw.ui')
 local Anim = require('playerAnim')
 local Settings = require('settings')
@@ -8,16 +9,9 @@ local StateManager = {
     states = {},
     activeState = nil,
     
-    -- Configuration. Read from the settings menu rather than hardcoded: this
-    -- was pinned true, so the per-transition console line below fired for
-    -- every player regardless of the debug setting used everywhere else.
     debugMode = false
 }
 
--- Transitions that are part of a continuous action rather than a new one.
--- Shimmy hands back to LedgeHang after every single step, so a held direction
--- re-enters LedgeHang about once per second -- without this the "LEDGE GRAB"
--- banner and the console line repeat for the whole traverse.
 local CONTINUATION = {
     LedgeHang = { Shimmy = true },
     Shimmy    = { LedgeHang = true, Shimmy = true },
@@ -62,23 +56,6 @@ function StateManager.setState(nextStateName, syncData)
         return
     end
 
-    -- PER-STATE TOGGLE. One lookup at the single point every transition passes
-    -- through, which is why it is here and not repeated across nine state files
-    -- and every branch inside them: LedgeHang can be entered from Airborne or
-    -- from Shimmy, Mantle from Idle, Airborne or a ledge climb-up, and a check
-    -- scattered across those routes is a check with a hole in it.
-    --
-    -- Refusing leaves the CURRENT state active rather than forcing a fallback.
-    -- The state that asked simply keeps running and will ask again next tick if
-    -- the condition persists, which is the behaviour it already has when Vault
-    -- or Mantle refuses a destination. Forcing Airborne here instead would
-    -- yank a hanging player off a ledge the moment they pressed toward a
-    -- disabled Shimmy.
-    --
-    -- Silent unless debugging. A disabled state's trigger condition can be true
-    -- for many consecutive ticks - a player holding jump at a wall with Mantle
-    -- off - and a print per tick is the log spam this mod has been bitten by
-    -- more than once.
     if not Settings.stateEnabled(nextStateName) then
         if Settings.debugMode() then
             ui.printToConsole("[FLOW:FSM] " .. nextStateName .. " DISABLED in settings",
@@ -100,40 +77,16 @@ function StateManager.setState(nextStateName, syncData)
     -- Pass syncData to enter()
     StateManager.activeState:enter(syncData)
 
-    -- [FIX] A state may REFUSE on entry - Vault and Mantle both validate their
-    -- destination in enter() and set self.abort when the move is not viable.
-    -- Announcing and animating regardless is what produced "the message says
-    -- MANTLE but nothing moves and no animation plays": the banner fired, the
-    -- clip started, and the next tick bounced to Airborne and cancelled it.
-    --
-    -- An aborted entry now announces nothing and plays nothing. The state
-    -- still returns to Airborne on its own next update.
     if StateManager.activeState.abort then
         if Settings.debugMode() then
-            -- Error, not Failure. ui.CONSOLE_COLOR has exactly four members -
-            -- Default, Error, Success, Info - so `.Failure` was nil and this
-            -- line handed nil to printToConsole, whose colour argument is not
-            -- optional. It only ever ran behind the debug setting, which is the
-            -- only reason it was not noticed.
             ui.printToConsole("[FLOW:FSM] " .. nextStateName .. " REFUSED on entry",
                 ui.CONSOLE_COLOR.Error)
         end
         return
     end
 
-    -- Single choke point for animations - states never call the animation
-    -- API themselves, see playerAnim.lua.
     Anim.onStateChange(nextStateName, prevStateName)
 
-    -- Visual Feedback for Parkour Actions. Announce the START of an action,
-    -- not every internal step of one.
-    --
-    -- Behind the Debug HUD setting: these banners are a development aid, not a
-    -- feature. In normal play the animation IS the feedback, and a caption on
-    -- every vault is noise - it also reads as a status report, which is how a
-    -- refused Mantle managed to look like a successful one for several
-    -- sessions. Same switch as the console trace below, so diagnostics travel
-    -- together.
     local continuation = isContinuation(nextStateName, prevStateName)
     local debugOn = Settings.debugMode()
 
@@ -145,8 +98,6 @@ function StateManager.setState(nextStateName, syncData)
         end
     end
 
-    -- Console logging for debugging history. Continuations are skipped for the
-    -- same reason, so a traverse does not bury the transitions worth seeing.
     if debugOn and not continuation then
         ui.printToConsole("[FLOW:FSM] Transition > " .. nextStateName, ui.CONSOLE_COLOR.Success)
     end

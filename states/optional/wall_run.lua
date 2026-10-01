@@ -1,12 +1,5 @@
 ---@omw-context player
---[[
-    states/optional/wall_run.lua
-
-    Moved out of the default state set to keep the lite build cheap.
-    Detection comes from core/optional/sensor_ext.lua, NOT core/sensor.lua.
-    See states/optional/README.md to wire this back in.
-]]--
-
+-- WallRun. Optional, not loaded by default.
 local BaseState = require('states/base_state')
 local core = require('openmw.core')
 local mwSelf = require('openmw.self')
@@ -21,9 +14,6 @@ local nearby = require('openmw.nearby')
 
 local WallRunState = BaseState.new("WallRun")
 
--- =============================================================================
--- CONFIGURATION
--- =============================================================================
 local DEBUG_MODE = true           
 local DEBUG_INTERVAL = 0.2        
 
@@ -47,9 +37,6 @@ local INITIAL_ARC = 600.0         -- Initial vertical pop
 local LAUNCH_DURATION = 0.30      -- Duration of the "Hard Lift" phase
 local LAUNCH_LIFT = 8.0           -- Vertical units per frame added during launch
 
--- =============================================================================
--- INTERNAL STATE
--- =============================================================================
 local currentRoll = 0
 local levitationApplied = false
 local activeSide = "None"
@@ -63,10 +50,6 @@ local hasReleasedJump = false
 local verticalVelocity = 0
 local forwardSpeed = 0            
 local timeInState = 0             
-
--- =============================================================================
--- HELPERS
--- =============================================================================
 
 local function lerp(a, b, t)
     return a + (b - a) * math.max(0, math.min(t, 1))
@@ -93,10 +76,6 @@ local function applyGravityHack(enable)
     end
 end
 
--- =============================================================================
--- STATE INTERFACE
--- =============================================================================
-
 function WallRunState:enter(syncData)
     if SensorExt.data.wallRun.side == "None" then
         self.abort = true
@@ -112,14 +91,6 @@ function WallRunState:enter(syncData)
     hasReleasedJump = false 
     timeInState = 0
     
-    -- 1. Calculate Arc (Vertical)
-    -- [BROKEN ON REVIVAL] syncData.verticalVelocity no longer exists -
-    -- EngineSync stopped computing it (and the smoothing buffer behind it)
-    -- once its only live consumer, airborne.lua's LedgeHang gate, moved to
-    -- a geometric test. This line will silently read nil and fall through
-    -- to 0, so the launch arc will always start at INITIAL_ARC.
-    -- Fix on revival: either restore a raw vertical component in
-    -- core/engine_sync.lua, or derive it here from a per-frame Z diff.
     local entryZ = (syncData and syncData.verticalVelocity) or 0
     verticalVelocity = math.max(entryZ * 0.5, INITIAL_ARC)
     
@@ -137,9 +108,6 @@ function WallRunState:enter(syncData)
     I.Controls.overrideMovementControls(true) 
     
     anim.playBlended(mwSelf, 'runforward', {
-        -- Weapon(7), not Movement + 10: the enum ends at Scripted(13), so the
-        -- old value (15) was off the end of it. See PRIORITY TIERS in
-        -- playerAnim.lua.
         priority = anim.PRIORITY.Weapon,
         loops = -1,
         speed = 1.35,
@@ -212,11 +180,6 @@ function WallRunState:update(dt, syncData, inputData)
 
     -- 2. Physics Calculation
     
-    -- A. Horizontal Velocity with SURFING BIAS
-    -- We add a portion of the normal to the run direction.
-    -- This ensures we are always moving slightly AWAY from the wall geometry,
-    -- preventing us from getting snagged on bricks/rocks at high speeds.
-    -- The Spring Arm (Correction) below will keep us from flying away.
     local surfDir = (runDir + (wallNormal * OUTWARD_BIAS)):normalize()
     local velocityVec = surfDir * forwardSpeed
     
@@ -234,8 +197,6 @@ function WallRunState:update(dt, syncData, inputData)
     local finalMovement = (velocityVec + correctionVec + gravityVec) * dt
     local nextPos = mwSelf.position + finalMovement
 
-    -- D. Hard Lift during Launch
-    -- Forcefully add Z-height to ensure we clear ground snapping threshold
     if isLaunching then
         local liftFactor = (1.0 - (timeInState/LAUNCH_DURATION))
         nextPos = nextPos + util.vector3(0, 0, LAUNCH_LIFT * liftFactor)

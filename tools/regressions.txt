@@ -77,7 +77,7 @@ needs: GRAB_MAX_FRAC
 
 file: states/airborne.lua
 why: the LedgeHang reach check measures against the band floor, not the wall-probe height. GRAB_HEIGHT sits below the band on purpose, so reading it here let the grab reach slightly downwards.
-needs: SensorExt.GRAB_MIN_HEIGHT
+needs: SensorExt.grabMinHeight()
 
 file: main.lua
 why: the throttle gate reads self.controls.run. Written as mwSelf - the idiom every other file uses - it indexed an undeclared global and threw every frame, killing Sensor, SensorExt, StateManager and the HUD while init still logged normally.
@@ -110,7 +110,7 @@ needs: pwwalljump1
 
 file: main.lua
 why: Roll and WallJump both hold a movement override that is load-bearing - Roll uses it to suppress jump and drive forward motion. A state holding an override without being listed in OVERRIDE_STATES has it released on the next tick by the safety net, silently, and the feature just looks broken.
-needs: Roll = true, WallJump = true
+needs: Roll = true
 
 file: states/roll.lua
 why: the roll is uninterruptible except by knockdown or death. types.Actor.canMove covers dead, paralyzed AND knocked down in one call; the old isGrounded bail-out cut the animation when rolling off a ledge and is deliberately gone.
@@ -121,7 +121,15 @@ file: states/airborne.lua
 why: WallJump detection is cast ONLY in the Jump trigger handler, never per frame. Its window and the Roll's minimum air time are what separate the two gestures, so one tap can never satisfy both.
 needs: WALL_JUMP_WINDOW
 needs: ROLL_MIN_AIR_TIME
+needs: WALL_JUMP_COOLDOWN
+
+file: core/body.lua
+why: actor dimensions come from getBoundingBox, not a hardcoded 128. Wrong for beast races, NPC.setScale and any body mod; every height band and the wall-jump reach derive from it.
 needs: getBoundingBox
+
+file: global/flow_amf_backend.lua
+why: WallJump uses the Hop move type, not Boost. Boost integrates a velocity and teleports to position+v*dt, which double-applies gravity (the engine already moved the actor) and launched at ~970 u/s. Hop drives Z on a fixed curve and reads X/Y live so engine movement and collision still apply.
+needs: Hop
 
 file: states/airborne.lua
 why: wallJumpUsed must NOT be cleared in enter(). WallJump exits back into Airborne, so clearing on entry re-arms the move at the top of every wall jump and gives an unlimited vertical climb. Touchdown clears it.

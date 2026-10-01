@@ -1,13 +1,5 @@
 ---@omw-context player
---[[
-    states/ledge_hang.lua
-
-    Detection (targetPos/wallNormal/etc) comes from
-    core/optional/sensor_ext.lua. The climb-up-to-Mantle handoff still
-    writes into core/sensor.lua's Sensor.data, since states/mantle.lua only
-    ever reads from there.
-]]--
-
+-- LedgeHang. Holds an overhead ledge; routes to Shimmy and Mantle.
 local BaseState = require('states/base_state')
 local core = require('openmw.core')
 local mwSelf = require('openmw.self')
@@ -26,14 +18,8 @@ local LedgeHangState = BaseState.new("LedgeHang")
 
 local KICK_RAY_OPTS = { ignore = mwSelf }
 
--- A lip handed over from Shimmy further than this from the player is stale and
--- is discarded. A real shimmy step moves STEP_DISTANCE (30), so anything near
--- this range cannot be from the hang we are resuming.
 local LIP_SANITY_RANGE = 300
 
--- =============================================================================
--- CONFIGURATION
--- =============================================================================
 local LEVITATE_MAG = 200      
 local HANG_OFFSET_Z = 125     
 local WALL_OFFSET = 35        
@@ -41,17 +27,10 @@ local KICK_FORCE_BACK = 350
 local KNEE_CHECK_DIST = 60
 local CLIMB_COOLDOWN = 0.3    -- [NEW] Time to wait before allowing climb-up
 
--- =============================================================================
--- INTERNAL STATE
--- =============================================================================
 local levitationApplied = false
 local wallNormal = nil
 local timeInState = 0         -- [NEW] Track how long we've been hanging
 local cachedTargetPos = nil   -- [NEW] Store the ledge position
-
--- =============================================================================
--- HELPERS
--- =============================================================================
 
 local function applyGravityHack(enable)
     local activeEffects = types.Actor.activeEffects(mwSelf)
@@ -78,13 +57,7 @@ local function snapTo(pos, rot)
     })
 end
 
--- =============================================================================
--- STATE INTERFACE
--- =============================================================================
-
 function LedgeHangState:enter(syncData)
-    -- Per-event, so gated: this fired on every grab and every shimmy step's
-    -- return to the hang, which buried anything worth reading.
     if Settings.debugMode() then print("[FLOW_STATE] >>> ENTERING LEDGE HANG") end
     
     local DebugHUD = require('core/debug_hud')
@@ -95,27 +68,8 @@ function LedgeHangState:enter(syncData)
     -- 1. Suspend Gravity
     applyGravityHack(true)
     
-    -- 2. Snap Position & Rotation
-    --
-    -- A lip handed back by Shimmy wins over the sensor. Returning from a step
-    -- the sensor may not re-detect on that exact frame -- updateLedgeHang
-    -- clears targetPos at the top of every call -- and without this the whole
-    -- snap block below was skipped, leaving wallNormal stale from the previous
-    -- step and the body un-anchored.
     local resumeLip, resumeNormal = ShimmyState.consumeResultLip()
 
-    -- [RESTORED] Sanity-check the handed-over lip before trusting it.
-    --
-    -- Shimmy sets resultLip on entry and on every step, but ONLY LedgeHang
-    -- consumes it. End a shimmy any other way - WallBoost, a crouch-drop, a
-    -- fall, a cell change - and the value is left set. The next hang, possibly
-    -- much later and somewhere else entirely, consumed it and snapped the
-    -- player to that old position. Across a cell boundary the old coordinates
-    -- are meaningless in the new cell's space, which is how it presents as a
-    -- teleport to roughly the origin rather than merely a wrong ledge.
-    --
-    -- This guard existed and was lost in a merge. It is cheap: one subtraction
-    -- and a length compare, only on entry.
     if resumeLip and (resumeLip - mwSelf.position):length() > LIP_SANITY_RANGE then
         resumeLip, resumeNormal = nil, nil
     end
@@ -139,14 +93,6 @@ function LedgeHangState:enter(syncData)
         snapTo(hangPos, targetRot)
     end
     
-    -- Animation is owned entirely by playerAnim.lua now (called right
-    -- after this enter() returns, via state_manager.lua's setState choke
-    -- point) - this used to call anim.playBlended('swimidle', ...)
-    -- directly, which raced with playerAnim.lua's own attempt to play
-    -- whatever's configured for "LedgeHang" and is exactly why the
-    -- configured custom animation wasn't reliably showing. See
-    -- playerAnim.lua's GROUPS.LedgeHang entry for the tuning (priority,
-    -- blendMask) that used to live here.
     
     I.Controls.overrideMovementControls(true)
     I.Controls.overrideCombatControls(true)
@@ -165,33 +111,16 @@ end
 function LedgeHangState:update(dt, syncData, inputData)
     timeInState = timeInState + dt
 
-    -- 0. SHIMMY - lateral input, no jump involved, so it cannot contend with
-    -- the jump-gated branches below. The destination is probed BEFORE the
-    -- transition so a blocked step never starts an animation or a move.
     local lateralInput = inputData.moveVector.x
     if math.abs(lateralInput) > 0.1 and wallNormal and cachedTargetPos then
         local dir = (lateralInput > 0) and 1 or -1
-        -- probeStep needs BOTH the body (clearance sweep) and the lip
-        -- (continuation probe); passing only the body made it always fail.
         local newLip = ShimmyState.probeStep(mwSelf.position, cachedTargetPos, wallNormal, dir)
         if newLip then
-            -- The lip rides along with the step. Assigning it to
-            -- cachedTargetPos here would be pointless: exit() runs before the
-            -- next enter() and nils it.
             ShimmyState.setStep(dir, wallNormal, newLip)
             return "Shimmy"
         end
     end
 
-    -- 1. WALL KICK / JUMP AWAY
-    --
-    -- [BUGFIX] This MUST be tested before the climb-up below. Both branches
-    -- are gated on inputData.jump, and the climb had no directional
-    -- condition at all - so once CLIMB_COOLDOWN elapsed it swallowed every
-    -- jump press, including jump+back. The kick was unreachable for the
-    -- entire life of the hang after the first 0.3s, and KICK_FORCE_BACK sat
-    -- as a dead constant. Checking the more specific condition first
-    -- restores it.
     if inputData.jump and inputData.moveVector.y < 0 then
         local kneePos = mwSelf.position + util.vector3(0,0, 30)
         local forward = util.transform.rotateZ(mwSelf.rotation:getYaw()):apply(util.vector3(0,1,0))
@@ -199,19 +128,6 @@ function LedgeHangState:update(dt, syncData, inputData)
         
         local res = nearby.castRay(kneePos, kickTarget, KICK_RAY_OPTS)
         
-        -- Face the way you are kicking. Hanging, the player is turned INTO
-        -- the wall; releasing without turning leaves them looking at the
-        -- surface they just pushed off.
-        --
-        -- 90 degrees, not 180. A full reversal points the camera straight down
-        -- the flight path and hides the wall entirely, which loses the sense of
-        -- having pushed off something. A quarter turn puts the wall in
-        -- peripheral view while opening up the direction of travel - the
-        -- player can see both where they came from and where they are going.
-        --
-        -- Sign follows the shimmy direction so the turn continues the way the
-        -- player was already moving; a kick from a standing hang defaults to
-        -- turning right.
         local turnSign = (ShimmyState.lastDirection() < 0) and -1 or 1
         local awayYaw = mwSelf.rotation:getYaw() + (turnSign * math.pi * 0.5)
         local awayRot = util.transform.rotateZ(awayYaw)
@@ -226,19 +142,11 @@ function LedgeHangState:update(dt, syncData, inputData)
         return "Airborne"
     end
 
-    -- 2. CLIMB UP (Mantle) - any jump press that isn't a deliberate
-    -- kick-away, once the entry cooldown has elapsed.
     if inputData.jump and timeInState > CLIMB_COOLDOWN then
 
-        -- [CRITICAL] Restore the cached target position into the Sensor data
-        -- This ensures Mantle receives the valid ledge position even if the sensor missed this frame.
         Sensor.data.interaction = "Mantle"
         Sensor.data.targetPos = cachedTargetPos  -- core Sensor, so mantle.lua picks it up
 
-        -- This ledge was validated when it was grabbed and the player has been
-        -- hanging from it since. Mantle's destination probes are stricter than
-        -- the grab test and were refusing climbs out of perfectly good hangs,
-        -- which is what made the jump-from-hang do nothing.
         MantleState.vouchDestination()
 
         return "Mantle"

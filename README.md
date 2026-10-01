@@ -3,6 +3,40 @@ A modular framework to animate and improve Morrowind's traversal gameplay
 
 ## Changes
 
+## Implementation notes
+
+Constraints that span two files, where nothing else connects them. Everything
+else lives in `RESEARCH.md`.
+
+- **`global/flow_amf_backend.lua` cannot raycast.** `openmw.nearby` is a
+  local-script module and does not exist in the global context; requiring it
+  there stops the whole backend loading. Ground detection for every move is
+  therefore done player-side, by the state, watching `syncData.isGrounded`.
+- **`Sensor.registerSharedRay()` and `Anim.registerAnimRefresh()` must be called
+  from `main.lua`'s `onActive`,** not at file scope. Only by then has every
+  player script loaded, so `I.SharedRay` and `I.AnimRefresh` are whichever copy
+  won the version race. At file scope it worked only by load-order luck.
+- **A version guard does not guard interface shape.** Nine mods bundle a
+  `SharedRay_v2`, all declaring version 2, so the first to load wins and FLOW's
+  stands down. `core/sensor.lua` resolves the accessor rather than the
+  interface, and derives distance from `hitPos`, which every copy provides.
+- **`main.lua`'s `OVERRIDE_STATES` must list every state that holds an
+  `I.Controls` override.** The per-tick safety net releases overrides for any
+  state not in that set, silently, so an unlisted state's override lasts one
+  frame. Currently: Vault, Mantle, LedgeHang, Shimmy, WallBoost, Ladder, Roll.
+- **`wallJumpUsed` clears on touchdown only,** never in `AirborneState:enter`.
+  WallJump exits back into Airborne, so clearing on entry gives an unlimited
+  vertical climb.
+- **`playerAnim.lua`'s `resolveGroup` falls back through pending variant, then
+  last played, then any key.** Ladder's variants are up/down/idle with no
+  "right", so a replay that sets no variant must not resolve to nil.
+- **`reissue()` checks `animation.isPlaying` before replaying.** AnimRefresh v4
+  delivers on subscribe and twice on load, so it is called when nothing was
+  lost; without the check, entering a cell while hanging restarts the pose.
+- **`core/h3lp_compat.lua` prints its live timer backend once at load.** h3lp is
+  a soft dependency tested with `vfs.fileExists`, so which implementation is
+  running is otherwise unanswerable from a log.
+
 ### WallJump, rebuilt
 
 Jump into a wall, then press jump again within 0.45s while still touching it,
