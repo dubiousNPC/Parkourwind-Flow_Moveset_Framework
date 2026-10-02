@@ -147,3 +147,22 @@ needs: wallJumpUsed = false
 file: core/engine_sync.lua
 why: the differencing must NOT be swapped for types.Actor.getCurrentSpeed until its semantics are settled - if it includes the vertical component it silently retunes Vault/Mantle reach during any fall, arriving disguised as a performance change. See docs/velocity_getter_research.md before removing this marker.
 needs: not-present getCurrentSpeed(
+
+file: playerAnim.lua
+why: the .kf keys pwmantle*/pwwallhangidle as startxw and pwshimmyl1 as startgf. Asking for the playBlended default "start" leaves the group unresolvable, and a full-body mask over an unresolved group suppresses vanilla and supplies nothing. Remove these only when the .kf is fixed.
+needs: startxw
+needs: startgf
+
+file: playerAnim.lua
+why: FLOW's default priority must out-rank the engine. Jump is 4 and Movement is 5, and equal priority in all four bone groups means NEITHER animation is visible - that was the mid-air tie and the on-the-ground loss.
+needs: not-present BONE_GROUP.Torso] = animation.PRIORITY.Jump
+
+file: states/airborne.lua
+why: priority ladder. Vault, then Mantle, then LedgeHang, then WallJump last - WallJump used to be consumed at the top of update() and pre-empted every other action.
+needs: jumpEdge
+needs: lookingAtLedge
+needs: not-present wallJumpRequested
+
+file: states/roll.lua
+why: ROLL_DURATION must not be shorter than pwroll1 (1.07s) or the state ends mid-clip.
+needs: ROLL_DURATION = 1.07

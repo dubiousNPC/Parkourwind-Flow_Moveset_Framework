@@ -3,6 +3,74 @@ A modular framework to animate and improve Morrowind's traversal gameplay
 
 ## Changes
 
+## Action priority
+
+The lowest available action always wins. Each rung is only reached when the one
+below it has refused, so WallJump exists for the case where the top is out of
+reach of everything else.
+
+| | rung | gate |
+|---|---|---|
+| 1 | **Vault** | 25-50% of height, destination not blocked |
+| 2 | **Mantle** | 51-80%, destination not blocked |
+| 3 | **LedgeHang** | 110-130%, lip above hand height, **and the camera aimed at or above the lip** |
+| 4 | **WallJump** | all three refused, wall contact, forward held, off cooldown |
+
+Resolved in `states/airborne.lua`'s `update`, in that order. From the ground,
+`states/idle.lua` resolves Vault then Mantle; the other two are airborne-only.
+
+The camera gate uses `I.SharedRay`, which is camera-aimed, and compares its hit
+height to the lip. That answers "pitched up towards the target" without
+depending on a pitch sign convention. No SharedRay means no gate.
+
+WallJump is driven by a jump **edge**, not held jump: the trigger handler sets a
+flag and the ladder consumes it, so the three lower rungs get first refusal on
+the same frame. Holding jump keeps Vault, Mantle and LedgeHang live as before.
+The wall ray is only cast once the ladder reaches rung 4.
+
+## Animation assets
+
+`playerAnim.lua` names the text keys that are actually in the `.kf`, not the
+`playBlended` defaults. **Four groups are keyed wrongly in the asset** and the
+code works around them; fixing the `.kf` is the better long-term answer, and the
+workaround should be removed in the same change.
+
+| group | key in the `.kf` | expected |
+|---|---|---|
+| `pwmantle1/2/3` | `startxw` | `start` |
+| `pwwallhangidle` | `startxw` | `start` |
+| `pwshimmyl1` | `startgf` | `start` |
+| `pwladderup` | two `start`, **no `stop`** | `start`, `stop` |
+| `pwrun1` | `start43` | `start` (unused by FLOW) |
+
+A group whose named key is absent cannot resolve, and a full-body blend mask
+over an unresolved group suppresses vanilla and supplies nothing.
+
+Measured clip lengths, used to set state durations and blend times:
+
+| clip | length |
+|---|---|
+| `pwwalljump1/2` | 0.23s |
+| `pwvault1/2/3` | 0.40s |
+| `pwboostbkl/r` | 0.50s |
+| `pwladderidle` | 0.83s |
+| `pwroll1`, `pwshimmyr1` | 1.07s |
+| `pwladderdwn` | 2.50s |
+| `pwladderup` | 2.87s |
+
+A state that ends before its clip cuts the animation: `ROLL_DURATION` was 0.45s
+against a 1.07s clip.
+
+**Priority.** The engine plays its jump at `PRIORITY.Jump` (4) and locomotion at
+`Movement` (5). Equal priority in all four bone groups means *neither* animation
+is visible, so FLOW's default was tying the engine mid-air and losing on the
+ground. The default is now `Weapon` (7); committed poses use `Block` (8).
+
+**Blending.** `animations/*/xParkourwind1*.yaml` carries the blend rules. A
+blend longer than about a third of the clip means it never fully asserts, and
+the clips above are short, so the wildcard base is 0.25s with shorter
+bottom-most overrides per group. Bottom-most rule wins.
+
 ## Implementation notes
 
 Constraints that span two files, where nothing else connects them. Everything

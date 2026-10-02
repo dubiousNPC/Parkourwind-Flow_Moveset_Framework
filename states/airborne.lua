@@ -23,6 +23,7 @@ local AirborneState = BaseState.new("Airborne")
 local AGILITY_BONUS = 70
 
 local LEDGE_GRAB_TOLERANCE = 20
+local LEDGE_AIM_TOLERANCE = 40
 
 local FORWARD_DEADZONE = 0.1
 
@@ -40,7 +41,7 @@ local timeAirborne = 0          -- seconds since this airborne period began;
                                  -- gates both the Roll and the WallJump
 local wallJumpUsed = false      -- one wall jump per airborne period. NOT reset
 local isActive = false          -- is Airborne the current state? gates the
-local wallJumpRequested = false
+local jumpEdge = false
 local wallJumpReadyAt = 0 -- set by the trigger handler, consumed by
 local agilityApplied = false
 
@@ -65,6 +66,15 @@ local WALL_RAY_OPTS = {
     collisionType = nearby.COLLISION_TYPE.World + nearby.COLLISION_TYPE.Door
 }
 
+-- Camera aimed at or above the lip. SharedRay is camera-aimed, so no pitch sign.
+local function lookingAtLedge(targetPos)
+    local get = I.SharedRay and (I.SharedRay.getUnclipped or I.SharedRay.get)
+    if not get then return true end
+    local ray = get()
+    if not (ray and ray.hit and ray.hitPos) then return true end
+    return ray.hitPos.z >= targetPos.z - LEDGE_AIM_TOLERANCE
+end
+
 -- One ray, straight ahead, cast only on the keypress.
 local function wallContact()
     local reach = Body.halfWidth() + WALL_CONTACT_MARGIN
@@ -83,18 +93,10 @@ input.registerTriggerHandler("Jump", async:callback(function()
     if core.isWorldPaused() then return end
     if not isActive then return end
 
-    if not wallJumpUsed
-       and not wallJumpRequested
-       and timeAirborne <= WALL_JUMP_WINDOW
-       and core.getRealTime() >= wallJumpReadyAt
-       and InputManager.intents.moveVector.y > FORWARD_DEADZONE
-       and Settings.stateEnabled("WallJump")
-       and wallContact() then
-        wallJumpUsed = true
-        wallJumpRequested = true
-        wallJumpReadyAt = core.getRealTime() + WALL_JUMP_COOLDOWN
-        return
+    if InputManager.intents.moveVector.y > FORWARD_DEADZONE then
+        jumpEdge = true
     end
+
 
     if armed then return end
 
@@ -141,7 +143,7 @@ function AirborneState:enter(syncData)
     -- Fresh airborne period starts unarmed.
     armed = false
     timeAirborne = 0
-    wallJumpRequested = false
+    jumpEdge = false
     landedSignal = false
 
 end
@@ -154,28 +156,41 @@ end
 function AirborneState:update(dt, syncData, inputData)
     timeAirborne = timeAirborne + dt
 
-    if wallJumpRequested then
-        wallJumpRequested = false
-        return "WallJump"
-    end
-
-    -- 1. Obstacle Interaction (Mid-Air) - jump-gated, matching Idle
+    -- PRIORITY LADDER. Lowest available action wins; WallJump is the last
+    -- resort, for when the top is out of reach of all three. See README.
     if inputData.jump then
-        if Sensor.data.interaction == "Vault" and not VaultState.isBlocked(Sensor.data.targetPos) then
+        if Sensor.data.interaction == "Vault"
+           and not VaultState.isBlocked(Sensor.data.targetPos) then
+            jumpEdge = false
             return "Vault"
         end
 
-        -- B. Ledge Hang (High/Overhead obstacles)
-        if SensorExt.data.interaction == "LedgeHang" and SensorExt.data.targetPos then
+        if Sensor.data.interaction == "Mantle"
+           and not MantleState.isBlocked(Sensor.data.targetPos) then
+            jumpEdge = false
+            return "Mantle"
+        end
+
+        if SensorExt.data.interaction == "LedgeHang" and SensorExt.data.targetPos
+           and lookingAtLedge(SensorExt.data.targetPos) then
             local handsZ = mwSelf.position.z + SensorExt.grabMinHeight() - LEDGE_GRAB_TOLERANCE
             if SensorExt.data.targetPos.z > handsZ then
+                jumpEdge = false
                 return "LedgeHang"
             end
         end
+    end
 
-        -- C. Mantling (Medium obstacles)
-        if Sensor.data.interaction == "Mantle" and not MantleState.isBlocked(Sensor.data.targetPos) then
-            return "Mantle"
+    if jumpEdge then
+        jumpEdge = false
+        if not wallJumpUsed
+           and timeAirborne <= WALL_JUMP_WINDOW
+           and core.getRealTime() >= wallJumpReadyAt
+           and Settings.stateEnabled("WallJump")
+           and wallContact() then
+            wallJumpUsed = true
+            wallJumpReadyAt = core.getRealTime() + WALL_JUMP_COOLDOWN
+            return "WallJump"
         end
     end
 

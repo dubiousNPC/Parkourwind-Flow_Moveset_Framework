@@ -10,19 +10,31 @@ local PRIORITY_FLOW       = animation.PRIORITY.Weapon
 local PRIORITY_FLOW_MAJOR = animation.PRIORITY.Block
 
 local GROUPS = {
-    Vault     = { group = { "pwvault1", "pwvault2", "pwvault3" }, speed = .8 },
+    Vault     = { group = { "pwvault1", "pwvault2", "pwvault3" }, speed = .8,
+        priority = PRIORITY_FLOW,
+        blendMask = animation.BLEND_MASK.All,
+        startKey = "start",
+        stopKey = "stop",
+    },
     Mantle    = { group = { "pwmantle1", "pwmantle2", "pwmantle3" }, speed = .7,
         priority = PRIORITY_FLOW_MAJOR,
         blendMask = animation.BLEND_MASK.All,
-        autoDisable = true},
+        autoDisable = true,
+        startKey = "startxw",   -- typo in the .kf; see README
+        stopKey = "stop",
+    },
     LedgeHang = {
         group = "pwwallhangidle", speed = .7,  -- looping hang pose
         priority = PRIORITY_FLOW_MAJOR,
         blendMask = animation.BLEND_MASK.All,
+        startKey = "startxw",   -- typo in the .kf; see README
+        stopKey = "stop",
     },
 
     Ladder = {
         variants = { up = "pwladderup", down = "pwladderdwn", idle = "pwladderidle" },
+        -- pwladderup has two start keys and no stop in every set but 1st-person.
+        variantStopKey = { up = false, down = "stop", idle = "stop" },
         speed = 1,
         priority = PRIORITY_FLOW_MAJOR,
         blendMask = animation.BLEND_MASK.All,
@@ -32,10 +44,11 @@ local GROUPS = {
 
     Shimmy = {
         variants = { left = "pwshimmyl1", right = "pwshimmyr1" },
+        -- Per-variant keys: the left clip is keyed startgf in the .kf.
+        variantStartKey = { left = "startgf", right = "start" },
         speed = 1,
         priority = PRIORITY_FLOW_MAJOR,
         blendMask = animation.BLEND_MASK.All,
-        startKey = "start",
         stopKey = "stop",
     },
 
@@ -69,11 +82,13 @@ local LOOPING_STATES = { LedgeHang = true, Ladder = true }
 local ONE_SHOT_STATES = { Vault = true, Mantle = true, Roll = true,
                           Shimmy = true, WallBoost = true, WallJump = true }
 
+-- Must out-rank the engine: Jump is 4 and Movement is 5, and equal priorities
+-- in all four bone groups means NEITHER animation is visible.
 local FULLBODY_PRIORITY = {
-    [animation.BONE_GROUP.RightArm] = animation.PRIORITY.Jump,
-    [animation.BONE_GROUP.LeftArm] = animation.PRIORITY.Jump,
-    [animation.BONE_GROUP.Torso] = animation.PRIORITY.Jump,
-    [animation.BONE_GROUP.LowerBody] = animation.PRIORITY.Jump,
+    [animation.BONE_GROUP.RightArm] = PRIORITY_FLOW,
+    [animation.BONE_GROUP.LeftArm] = PRIORITY_FLOW,
+    [animation.BONE_GROUP.Torso] = PRIORITY_FLOW,
+    [animation.BONE_GROUP.LowerBody] = PRIORITY_FLOW,
 }
 local FULLBODY_BLEND_MASK = animation.BLEND_MASK.LeftArm + animation.BLEND_MASK.Torso
                            + animation.BLEND_MASK.RightArm + animation.BLEND_MASK.LowerBody
@@ -113,7 +128,7 @@ local function resolveGroup(entry)
             for k, g in pairs(entry.variants) do key, group = k, g; break end
         end
         if key then lastVariant[entry] = key end
-        return group
+        return group, key
     end
 
     if type(entry.group) == "table" then
@@ -178,7 +193,7 @@ end
 
 local function playGroup(stateName, looping)
     local entry = GROUPS[stateName]
-    local group = resolveGroup(entry)
+    local group, variant = resolveGroup(entry)
     pendingVariant = nil   -- consumed; never let a direction leak forward
     if not group then return end
 
@@ -188,9 +203,18 @@ local function playGroup(stateName, looping)
     local autoDisable = entry.autoDisable
     if autoDisable == nil then autoDisable = not looping end
 
+    local startKey = entry.startKey
+    local stopKey = entry.stopKey
+    if variant then
+        local vs = entry.variantStartKey and entry.variantStartKey[variant]
+        local vt = entry.variantStopKey and entry.variantStopKey[variant]
+        if vs ~= nil then startKey = vs or nil end
+        if vt ~= nil then stopKey = vt or nil end
+    end
+
     animation.playBlended(self, group, {
-        startKey = entry.startKey,
-        stopKey = entry.stopKey,
+        startKey = startKey,
+        stopKey = stopKey,
         priority = entry.priority or FULLBODY_PRIORITY,
         blendMask = entry.blendMask or FULLBODY_BLEND_MASK,
         speed = entry.speed or 1,

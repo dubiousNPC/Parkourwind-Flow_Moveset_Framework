@@ -7,7 +7,7 @@ local I = require('openmw.interfaces')
 
 local RollState = BaseState.new("Roll")
 
-local ROLL_DURATION = 0.45      -- recovery window before handing back to
+local ROLL_DURATION = 1.07   -- pwroll1's own length, read from the .kf
 
 local REFUND_MIN = 0.25
 local REFUND_MAX = 0.75
