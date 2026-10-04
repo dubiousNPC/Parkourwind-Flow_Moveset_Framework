@@ -30,7 +30,7 @@ local FORWARD_DEADZONE = 0.1
 local ROLL_MIN_AIR_TIME = 1.0
 
 local WALL_JUMP_WINDOW = 0.45
-local WALL_JUMP_COOLDOWN = 1.2
+local WALL_JUMP_COOLDOWN = 2.0
 
 local WALL_CONTACT_MARGIN = 8.0
 
@@ -42,7 +42,9 @@ local timeAirborne = 0          -- seconds since this airborne period began;
 local wallJumpUsed = false      -- one wall jump per airborne period. NOT reset
 local isActive = false          -- is Airborne the current state? gates the
 local jumpEdge = false
-local wallJumpReadyAt = 0 -- set by the trigger handler, consumed by
+local wallJumpReadyAt = 0
+local groundedFor = 0
+local GROUND_CONFIRM = 0.15 -- set by the trigger handler, consumed by
 local agilityApplied = false
 
 local function applyAgility(enable)
@@ -184,6 +186,7 @@ function AirborneState:update(dt, syncData, inputData)
     if jumpEdge then
         jumpEdge = false
         if not wallJumpUsed
+           and Sensor.data.tooHigh
            and timeAirborne <= WALL_JUMP_WINDOW
            and core.getRealTime() >= wallJumpReadyAt
            and Settings.stateEnabled("WallJump")
@@ -197,13 +200,15 @@ function AirborneState:update(dt, syncData, inputData)
     local touchedDown = syncData.isGrounded or (landedSignal and armed)
 
     if not touchedDown then
+        groundedFor = 0
         healthBeforeLanding = types.Actor.stats.dynamic.health(mwSelf).current
     end
 
     -- 2. Landing Logic
     if touchedDown then
         landedSignal = false
-        wallJumpUsed = false   -- cleared on touchdown only; see README
+        groundedFor = groundedFor + dt
+        if groundedFor >= GROUND_CONFIRM then wallJumpUsed = false end
         if armed then
             applyAgility(false)
             armed = false

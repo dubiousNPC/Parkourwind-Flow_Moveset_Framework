@@ -41,6 +41,9 @@ local Sensor = {
 
     data = {
         interaction = "None",
+        -- Set when a top surface was found but sits above the Mantle band.
+        -- WallJump reads this: a top that exists but is out of reach.
+        tooHigh = false,
         targetPos = nil,
         wallDist = 0,
         objHeight = 0,
@@ -118,6 +121,7 @@ end
 
 function Sensor.update(dt, inputIntents, syncData)
     Sensor.data.interaction = "None"
+    Sensor.data.tooHigh = false
     Sensor.data.targetPos = nil
     Sensor.data.wallDist = 0
     Sensor.data.objHeight = 0
@@ -220,6 +224,7 @@ function Sensor.update(dt, inputIntents, syncData)
     end
 
     if relativeHeight > Sensor.maxMantleHeight() then
+        Sensor.data.tooHigh = true
         Sensor.data.debugReason = "Too High (see LedgeHang)"
         return
     end

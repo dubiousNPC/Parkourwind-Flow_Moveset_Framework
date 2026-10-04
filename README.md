@@ -30,46 +30,48 @@ The wall ray is only cast once the ladder reaches rung 4.
 
 ## Animation assets
 
-`playerAnim.lua` names the text keys that are actually in the `.kf`, not the
-`playBlended` defaults. **Four groups are keyed wrongly in the asset** and the
-code works around them; fixing the `.kf` is the better long-term answer, and the
-workaround should be removed in the same change.
+`Anim.verifyGroups` probes every configured clip at startup and logs the group
+**and its named text keys**, because a group that exists while its start key
+does not is unplayable and completely silent. Read that block in the log before
+diagnosing an animation.
 
-| group | key in the `.kf` | expected |
-|---|---|---|
-| `pwmantle1/2/3` | `startxw` | `start` |
-| `pwwallhangidle` | `startxw` | `start` |
-| `pwshimmyl1` | `startgf` | `start` |
-| `pwladderup` | two `start`, **no `stop`** | `start`, `stop` |
-| `pwrun1` | `start43` | `start` (unused by FLOW) |
+Every clip in the shipped `.kf` sets is keyed `start` / `stop`. An earlier pass
+claimed otherwise and set Mantle, LedgeHang and left-Shimmy to `startxw` /
+`startgf`; those are not keys, they were an artifact of reading the binary with
+a regex that ran past each string's length prefix into the next string. Read
+`.kf` strings length-prefixed, or just read the verifyGroups log.
 
-A group whose named key is absent cannot resolve, and a full-body blend mask
-over an unresolved group suppresses vanilla and supplies nothing.
+One real asset gap was found and has since been fixed upstream: `pwladderup`
+was missing its `stop` key in every set except first-person.
 
-Measured clip lengths, used to set state durations and blend times:
+Measured clip lengths, used to set state durations, animation speeds and blend
+times:
 
 | clip | length |
 |---|---|
 | `pwwalljump1/2` | 0.23s |
-| `pwvault1/2/3` | 0.40s |
-| `pwboostbkl/r` | 0.50s |
+| `pwvault1/2/3`, `pwmantle1/2/3` | 0.40s |
+| `pwboostbkl/r`, `pwropeidle` | 0.50s |
 | `pwladderidle` | 0.83s |
-| `pwroll1`, `pwshimmyr1` | 1.07s |
+| `pwropeup/dwn` | 1.00s |
+| `pwroll1`, `pwshimmyl1/r1`, `pwwallhangidle` | 1.07s |
+| `pwrun1` | 1.33s |
 | `pwladderdwn` | 2.50s |
-| `pwladderup` | 2.87s |
+| `pwladderup` | 2.83s |
 
-A state that ends before its clip cuts the animation: `ROLL_DURATION` was 0.45s
-against a 1.07s clip.
+A state that ends before its clip cuts the animation, and a clip much shorter
+than its move is invisible. WallJump plays its 0.23s clip at `speed = 0.45` so
+it spans the hop instead of flashing.
 
 **Priority.** The engine plays its jump at `PRIORITY.Jump` (4) and locomotion at
 `Movement` (5). Equal priority in all four bone groups means *neither* animation
-is visible, so FLOW's default was tying the engine mid-air and losing on the
-ground. The default is now `Weapon` (7); committed poses use `Block` (8).
+is visible, so a default of `Jump` ties the engine mid-air and loses on the
+ground. The default is `Weapon` (7); committed poses use `Block` (8).
 
 **Blending.** `animations/*/xParkourwind1*.yaml` carries the blend rules. A
-blend longer than about a third of the clip means it never fully asserts, and
-the clips above are short, so the wildcard base is 0.25s with shorter
-bottom-most overrides per group. Bottom-most rule wins.
+blend longer than about a third of the clip never fully asserts, and these clips
+are short, so the wildcard base is 0.25s with shorter bottom-most overrides per
+group. Bottom-most rule wins.
 
 ## Implementation notes
 

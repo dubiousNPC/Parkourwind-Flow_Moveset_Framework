@@ -6,6 +6,7 @@ network connection — they are Python 3 and the mod's own source.
 ```sh
 python3 tools/check_syntax.py .
 python3 tools/check_context.py . /path/to/Cod3x
+python3 tools/check_handlers.py .
 python3 tools/check_regressions.py .
 ```
 
@@ -42,6 +43,21 @@ merges, each rediscovered the expensive way. A marker per fix costs two lines.
 Markers live in `regressions.txt` and can be positive (must be present) or
 `not-present` (must not have come back) — the second kind matters because two of
 the worst bugs were something *returning*, not something going missing.
+
+**check_handlers.py** — a name under `engineHandlers` that is not a documented
+engine handler is rejected by the engine with one log line and no other warning.
+AnimRefresh v4 registered `UiModeChanged` — an **event** — as an engine handler,
+so its Rest/Travel/Training/Jail refresh never ran in any mod shipping that
+file, and nothing in this toolchain looked at handler names. The inverse is
+quieter still: an engine handler under `eventHandlers` is never called and logs
+nothing. Checked against the documented handler set and each file's
+`---@omw-context`.
+
+It parses rather than loading the module, since there is no Lua interpreter
+here. The usual objection — that a regex cannot tell a table key from an
+assignment inside an inline `function() ... end` — is handled by brace- *and*
+`function`/`end`-matching and taking keys at depth 1 only. That exact false
+positive showed up in its own negative suite and was fixed before shipping.
 
 ## Adding a marker
 

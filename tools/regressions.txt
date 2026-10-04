@@ -89,7 +89,7 @@ needs: if Anim.verifyGroups then
 
 file: FLOW_AMF.omwscripts
 why: AnimRefresh must be registered at the SHARED path so OpenMW merges FLOW's copy with every other mod's into one script. The filename carries the version, so a bump changes this line.
-needs: scripts/AnimRefresh/AnimRefresh_v4.lua
+needs: scripts/AnimRefresh/AnimRefresh_v5.lua
 
 file: FLOW_AMF.omwscripts
 why: SharedRay must be registered at the shared path for the same reason. Third-party file - never edit its contents.
@@ -149,9 +149,10 @@ why: the differencing must NOT be swapped for types.Actor.getCurrentSpeed until 
 needs: not-present getCurrentSpeed(
 
 file: playerAnim.lua
-why: the .kf keys pwmantle*/pwwallhangidle as startxw and pwshimmyl1 as startgf. Asking for the playBlended default "start" leaves the group unresolvable, and a full-body mask over an unresolved group suppresses vanilla and supplies nothing. Remove these only when the .kf is fixed.
-needs: startxw
-needs: startgf
+why: every clip in the .kf is keyed start/stop. An earlier pass "fixed" Mantle, LedgeHang and left-Shimmy to startxw/startgf, which are not keys at all - they were an artifact of a regex that read past each string's length prefix into the next string. Naming a key that does not exist leaves the group unplayable and silent. Verify keys with a length-prefixed read, or with Anim.verifyGroups in game.
+needs: not-present startxw
+needs: not-present startgf
+needs: not-present variantStopKey = { up = false
 
 file: playerAnim.lua
 why: FLOW's default priority must out-rank the engine. Jump is 4 and Movement is 5, and equal priority in all four bone groups means NEITHER animation is visible - that was the mid-air tie and the on-the-ground loss.
@@ -166,3 +167,20 @@ needs: not-present wallJumpRequested
 file: states/roll.lua
 why: ROLL_DURATION must not be shorter than pwroll1 (1.07s) or the state ends mid-clip.
 needs: ROLL_DURATION = 1.07
+
+file: core/sensor.lua
+why: WallJump reads Sensor.data.tooHigh - a top surface that exists but sits above the Mantle band. Without it, a featureless wall offers no action at all, every rung refuses, and repeated presses wall-jump up a flat face.
+needs: tooHigh
+
+file: states/airborne.lua
+why: wallJumpUsed clears only after the feet have been down for GROUND_CONFIRM. A single frame of isGrounded next to geometry re-armed the move mid-climb.
+needs: GROUND_CONFIRM
+
+file: states/wall_jump.lua
+why: Levitate is held for the duration of the hop. The hop drives Z absolutely while engine gravity keeps accumulating, so without it the actor drops at full accumulated speed the instant the hop ends - the "sudden teleport" feel.
+needs: LEVITATE_MAG
+needs: BRACE_DURATION
+
+file: playerAnim.lua
+why: verifyGroups probes the text KEYS as well as the group. A group that exists but whose named start key does not is unplayable and silent, which is how a bad key survived a release.
+needs: getTextKeyTime

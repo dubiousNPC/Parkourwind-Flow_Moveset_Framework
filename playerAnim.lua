@@ -20,21 +20,19 @@ local GROUPS = {
         priority = PRIORITY_FLOW_MAJOR,
         blendMask = animation.BLEND_MASK.All,
         autoDisable = true,
-        startKey = "startxw",   -- typo in the .kf; see README
+        startKey = "start",
         stopKey = "stop",
     },
     LedgeHang = {
         group = "pwwallhangidle", speed = .7,  -- looping hang pose
         priority = PRIORITY_FLOW_MAJOR,
         blendMask = animation.BLEND_MASK.All,
-        startKey = "startxw",   -- typo in the .kf; see README
+        startKey = "start",
         stopKey = "stop",
     },
 
     Ladder = {
         variants = { up = "pwladderup", down = "pwladderdwn", idle = "pwladderidle" },
-        -- pwladderup has two start keys and no stop in every set but 1st-person.
-        variantStopKey = { up = false, down = "stop", idle = "stop" },
         speed = 1,
         priority = PRIORITY_FLOW_MAJOR,
         blendMask = animation.BLEND_MASK.All,
@@ -44,11 +42,10 @@ local GROUPS = {
 
     Shimmy = {
         variants = { left = "pwshimmyl1", right = "pwshimmyr1" },
-        -- Per-variant keys: the left clip is keyed startgf in the .kf.
-        variantStartKey = { left = "startgf", right = "start" },
         speed = 1,
         priority = PRIORITY_FLOW_MAJOR,
         blendMask = animation.BLEND_MASK.All,
+        startKey = "start",
         stopKey = "stop",
     },
 
@@ -70,7 +67,8 @@ local GROUPS = {
     },
 
     WallJump  = {
-        group = "pwwalljump1", speed = 1,
+        -- 0.23s clip stretched over the hop; see states/wall_jump.lua.
+        group = { "pwwalljump1", "pwwalljump2" }, speed = 0.45,
         priority = PRIORITY_FLOW_MAJOR,
         blendMask = animation.BLEND_MASK.All,
         startKey = "start",
@@ -103,7 +101,7 @@ function Anim.registerAnimRefresh()
     if not I.AnimRefresh then
         print("[FLOW:Anim] I.AnimRefresh not found - poses will not survive a "
             .. "first/third-person switch. Make sure scripts/AnimRefresh/"
-            .. "AnimRefresh_v4.lua is registered in FLOW_AMF.omwscripts.")
+            .. "AnimRefresh_v5.lua is registered in FLOW_AMF.omwscripts.")
         return
     end
 
@@ -155,14 +153,17 @@ function Anim.verifyGroups()
         if type(entry) == "table" then
             if entry.variants then
                 for dir, g in pairs(entry.variants) do
-                    probes[#probes + 1] = { stateName .. "/" .. dir, g }
+                    probes[#probes + 1] = { stateName .. "/" .. dir, g,
+                        (entry.variantStartKey and entry.variantStartKey[dir]) or entry.startKey,
+                        (entry.variantStopKey and entry.variantStopKey[dir]) or entry.stopKey }
                 end
             elseif type(entry.group) == "table" then
                 for i = 1, #entry.group do
-                    probes[#probes + 1] = { stateName .. "[" .. i .. "]", entry.group[i] }
+                    probes[#probes + 1] = { stateName .. "[" .. i .. "]", entry.group[i],
+                        entry.startKey, entry.stopKey }
                 end
             elseif entry.group then
-                probes[#probes + 1] = { stateName, entry.group }
+                probes[#probes + 1] = { stateName, entry.group, entry.startKey, entry.stopKey }
             end
         else
             print(string.format("[FLOW][anim] MALFORMED GROUPS entry '%s' (%s, expected table)",
@@ -170,14 +171,29 @@ function Anim.verifyGroups()
         end
     end
 
+    -- Probe the GROUP and the named text KEYS. A group that exists but whose
+    -- start key does not is unplayable and silent, which is how a bad key
+    -- survived a release.
     for i = 1, #probes do
-        local label, group = probes[i][1], probes[i][2]
-        local present = animation.hasGroup(self, group)
-        if present then
-            print(string.format("[FLOW][anim] %-16s '%s' -> OK", label, group))
-        else
-            print(string.format("[FLOW][anim] %-16s '%s' -> MISSING (will T-pose or do nothing)",
+        local label, group, sk, tk = probes[i][1], probes[i][2], probes[i][3], probes[i][4]
+        if not animation.hasGroup(self, group) then
+            print(string.format("[FLOW][anim] %-18s '%s' -> MISSING GROUP (T-pose or nothing)",
                 label, group))
+        elseif not animation.getTextKeyTime then
+            print(string.format("[FLOW][anim] %-18s '%s' -> group OK (keys unchecked)", label, group))
+        else
+            local bad = {}
+            for _, key in ipairs({ sk or "start", tk or "stop" }) do
+                if not animation.getTextKeyTime(self, group .. ": " .. key) then
+                    bad[#bad + 1] = key
+                end
+            end
+            if #bad == 0 then
+                print(string.format("[FLOW][anim] %-18s '%s' -> OK", label, group))
+            else
+                print(string.format("[FLOW][anim] %-18s '%s' -> MISSING KEY(S): %s",
+                    label, group, table.concat(bad, ", ")))
+            end
         end
     end
 

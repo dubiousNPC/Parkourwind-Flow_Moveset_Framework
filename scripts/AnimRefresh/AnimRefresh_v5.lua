@@ -1,6 +1,6 @@
 ---@omw-context player
 --[[
-    AnimRefresh v4 -- model-rebuild notifier
+    AnimRefresh v5 -- model-rebuild notifier
 
     THE PROBLEM
     -----------
@@ -15,6 +15,32 @@
       * crossing the FIRST-PERSON boundary,
       * a UI mode that rebuilds the model (Rest, Travel, Training, Jail),
       * loading a save.
+
+    WHY v5 AND NOT A FIXED v4
+    -------------------------
+    v4 registered `UiModeChanged` under `engineHandlers`. It is an EVENT, so
+    OpenMW rejected it:
+
+        Not supported handler 'UiModeChanged' in
+        L@0x1[scripts/animrefresh/animrefresh_v4.lua]
+
+    one line per game, and v4's Rest/Travel/Training/Jail refresh -- one of the
+    four things v4 was written to add -- never ran in any mod shipping it. It is
+    moved to `eventHandlers` here.
+
+    That fix alone was not enough, and the reason is the whole point of the
+    versioned filename. Every mod bundles this file at ONE shared VFS path, so
+    only one copy exists at runtime: whichever data directory wins. A fixed v4
+    and an unfixed v4 are the same path, so which copy a player gets is decided
+    by their install order rather than by which one is correct -- and nothing in
+    the game says which they got. Raising the number gives the fixed copy a path
+    of its own, and the `>=` guard then makes it win over any older copy still
+    installed, in either load order.
+
+    A stale v4 left in another mod is harmless once this exists: it registers,
+    loses the guard, and runs inert with no subscribers. It does still log the
+    "Not supported handler" line until that mod is updated, so that line now
+    reports which mod is behind instead of a live bug.
 
     WHAT CHANGED IN v4, AND WHY
     ---------------------------
@@ -108,7 +134,7 @@ local camera = require('openmw.camera')
 local async  = require('openmw.async')
 local I      = require('openmw.interfaces')
 
-local MY_VERSION = 4
+local MY_VERSION = 5
 
 if I.AnimRefresh and I.AnimRefresh.version >= MY_VERSION then
     return
@@ -367,9 +393,18 @@ return {
         getMode       = getMode,
         isFirstPerson = isFirstPersonNow,
     },
+    -- UiModeChanged is an EVENT, not an engine handler. Registering it under
+    -- engineHandlers makes OpenMW reject it outright:
+    --     Not supported handler 'UiModeChanged' in
+    --     L@0x1[scripts/animrefresh/animrefresh_v4.lua]
+    -- which is in the log of every game running v4. The consequence is that
+    -- v4's Rest/Travel/Training/Jail coverage -- one of the four things the
+    -- version was written to add -- has never actually run.
+    eventHandlers = {
+        UiModeChanged  = uiModeChanged,
+    },
     engineHandlers = {
         onUpdate       = onUpdate,
         onLoad         = onLoad,
-        UiModeChanged  = uiModeChanged,
     },
 }
