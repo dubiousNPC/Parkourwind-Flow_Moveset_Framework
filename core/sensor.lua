@@ -147,12 +147,12 @@ function Sensor.update(dt, inputIntents, syncData)
         if ray and ray.hit and ray.hitPos and ray.hitNormal
            and ray.hitNormal.z < Sensor.WALKABLE_SLOPE_Z then
 
-            local dist = ray.distance
-            if type(dist) ~= "number" then
-                dist = (ray.hitPos - self.object.position):length()
-            end
+            -- SharedRay's distance is from the camera; reach is from the feet.
+            local flat = ray.hitPos - pos
+            local dist = util.vector2(flat.x, flat.y):length()
+            local ahead = flat.x * forward.x + flat.y * forward.y > 0
 
-            if dist <= dynamicReach then
+            if ahead and dist <= dynamicReach then
                 wallPos, wallNormal, wallDist = ray.hitPos, ray.hitNormal, dist
                 source = getObjectName(ray.hitObject)
             end

@@ -1,10 +1,6 @@
 ---@omw-context global
 -- Movement backend. Global context: teleport only, no raycasts.
-local core = require('openmw.core')
 local util = require('openmw.util')
-local types = require('openmw.types')
-local storage = require('openmw.storage')
-local world = require('openmw.world')
 
 local ActiveMoves = {}
 
@@ -20,7 +16,6 @@ local function onMantleStart(data)
     ActiveMoves[id] = {
         type = "Mantle",
         actor = data.actor,
-        cageFrom = data.cageFrom,
         startPos = data.startPos,
         risePos = data.risePos,
         targetPos = data.targetPos,
@@ -35,7 +30,6 @@ local function onVaultStart(data)
     ActiveMoves[id] = {
         type = "Vault",
         actor = data.actor,
-        cageFrom = data.cageFrom,
         startPos = data.startPos,
         apexPos = data.apexPos,
         landPos = data.landPos,
@@ -138,7 +132,6 @@ local function onUpdate(dt)
                         ActiveMoves[id] = nil
                     end
                 else
-                    -- Simple Linear Interpolation for stability
                     nextPos = currentStart + (currentDest - currentStart) * move.progress
                 end
             elseif move.type == "Hop" then

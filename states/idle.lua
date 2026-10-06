@@ -10,12 +10,10 @@ local LadderState = require('states/ladder')
 local IdleState = BaseState.new("Idle")
 
 function IdleState:update(dt, syncData, inputData)
-    -- 1. To Airborne
     if not syncData.isGrounded then
         return "Airborne"
     end
 
-    -- 2. Obstacle Handling (Jump Pressed)
     if inputData.jump then
         local fat = types.Actor.stats.dynamic.fatigue(mwSelf).current
 
@@ -23,13 +21,6 @@ function IdleState:update(dt, syncData, inputData)
             if fat > 5 then return "Vault" end
         elseif Sensor.data.interaction == "Mantle" and not MantleState.isBlocked(Sensor.data.targetPos) then
             if fat > 10 then return "Mantle" end
-        end
-    end
-
-    if inputData.sprint and inputData.moveVector.y > 0 then
-        local fat = types.Actor.stats.dynamic.fatigue(mwSelf).current
-        if fat > 0 then
-            return "Idle"
         end
     end
 

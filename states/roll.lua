@@ -76,7 +76,7 @@ function RollState:update(dt, syncData, inputData)
             -- Don't resurrect: if the fall was fatal, leave it fatal.
             if hp.current > 0 then
                 local refund = lost * refundFraction()
-                hp.current = math.min(hp.base, hp.current + refund)
+                hp.current = math.min(hp.base + hp.modifier, hp.current + refund)
             end
             refundApplied = true
         end

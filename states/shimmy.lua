@@ -5,11 +5,11 @@ local mwSelf = require('openmw.self')
 local util = require('openmw.util')
 local nearby = require('openmw.nearby')
 local I = require('openmw.interfaces')
-local types = require('openmw.types')
 local BaseState = require('states/base_state')
 local Anim = require('playerAnim')
 local WallBoostState = require('states/wall_boost')
 local Settings = require('settings')
+local Owned = require('core/owned')
 
 local ShimmyState = BaseState.new("Shimmy")
 
@@ -85,9 +85,15 @@ local dir = 0
 local startPos = nil
 local endPos = nil
 local wallNormal = nil
+local lastStepDir = 0
 
+function ShimmyState.clearLastDirection()
+    lastStepDir = 0
+end
+
+-- Direction of the last step on this ledge, kept after the step ends.
 function ShimmyState.lastDirection()
-    return dir
+    return lastStepDir
 end
 
 local GRAVITY_MAGNITUDE = 200
@@ -101,9 +107,7 @@ local function applySuspension(enable)
         return
     end
     suspensionApplied = enable
-    types.Actor.activeEffects(mwSelf):modify(
-        enable and GRAVITY_MAGNITUDE or -GRAVITY_MAGNITUDE,
-        core.magic.EFFECT_TYPE.Levitate)
+    Owned.effect(core.magic.EFFECT_TYPE.Levitate, enable and GRAVITY_MAGNITUDE or -GRAVITY_MAGNITUDE)
     I.Controls.overrideMovementControls(enable)
     I.Controls.overrideCombatControls(enable)
 end
@@ -111,6 +115,7 @@ end
 function ShimmyState:enter(syncData)
     timeInState = 0
     dir = pendingDir
+    lastStepDir = dir
     wallNormal = pendingWallNormal
 
     local variant = dir < 0 and "left" or "right"
@@ -136,7 +141,7 @@ function ShimmyState:exit()
     applySuspension(false)
     startPos = nil
     endPos = nil
-    dir = 0          -- so lastDirection() cannot report a stale step
+    dir = 0
 end
 
 function ShimmyState:update(dt, syncData, inputData)
@@ -144,11 +149,12 @@ function ShimmyState:update(dt, syncData, inputData)
 
     if inputData.jump and Settings.stateEnabled("WallBoost") then
         WallBoostState.setLaunch(wallNormal, dir)
+        resultLip, resultNormal = nil, nil
         return "WallBoost"
     end
 
-    -- Drop out of the hang entirely.
     if inputData.crouch then
+        resultLip, resultNormal = nil, nil
         return "Airborne"
     end
 
@@ -174,8 +180,5 @@ function ShimmyState:update(dt, syncData, inputData)
 
     return nil
 end
-
--- Exposed so ledge_hang.lua doesn't duplicate the constant.
-ShimmyState.STEP_DISTANCE = STEP_DISTANCE
 
 return ShimmyState

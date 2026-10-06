@@ -4,7 +4,7 @@
 
     Provides a single async rendering raycast per frame for all mods to consume.
 	Can be bundled in every mod, only runs once (the latest version)
-	
+
     Examples:
         local result = I.SharedRay.get()
         if result.hit then

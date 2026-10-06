@@ -2,15 +2,17 @@
 -- Per-frame actor state. See docs/velocity_getter_research.md.
 local self = require('openmw.self')
 local types = require('openmw.types')
-local util = require('openmw.util')
+
+local GROUND_CONFIRM = 0.15
 
 local EngineSync = {
-    TELEPORT_THRESHOLD = 10.0,
+    TELEPORT_SPEED = 3000.0,
 
     data = {
-        position = util.vector3(0,0,0),
         forwardVelocity = 0,
-        isGrounded = true
+        isGrounded = true,
+        groundedTime = 0,
+        landings = 0,
     },
 
     prevPos = nil,
@@ -20,13 +22,26 @@ local EngineSync = {
 }
 
 function EngineSync.init()
-    print("[FLOW] EngineSync Initializing...")
     EngineSync.prevPos = self.object.position
     EngineSync.initialized = true
 end
 
 function EngineSync.suspendTeleportDetection(suspend)
     EngineSync.suspended = suspend
+end
+
+local function updateGround(dt)
+    local data = EngineSync.data
+    data.isGrounded = types.Actor.isOnGround(self.object)
+    if not data.isGrounded then
+        data.groundedTime = 0
+        return
+    end
+    local before = data.groundedTime
+    data.groundedTime = before + dt
+    if before < GROUND_CONFIRM and data.groundedTime >= GROUND_CONFIRM then
+        data.landings = data.landings + 1
+    end
 end
 
 function EngineSync.update(dt)
@@ -39,26 +54,19 @@ function EngineSync.update(dt)
         return
     end
 
-    local delta = currentPos - EngineSync.prevPos
+    updateGround(dt)
 
-    local distSq = delta:length2()
+    local dx = currentPos.x - EngineSync.prevPos.x
+    local dy = currentPos.y - EngineSync.prevPos.y
+    EngineSync.prevPos = currentPos
 
-    if distSq > (EngineSync.TELEPORT_THRESHOLD * EngineSync.TELEPORT_THRESHOLD)
-       and not EngineSync.suspended then
+    local speed = math.sqrt(dx * dx + dy * dy) / dt
+    if speed > EngineSync.TELEPORT_SPEED and not EngineSync.suspended then
         EngineSync.data.forwardVelocity = 0
-        EngineSync.prevPos = currentPos
         return
     end
 
-    local invDt = 1.0 / dt
-    local vx, vy = delta.x * invDt, delta.y * invDt
-
-    EngineSync.data.forwardVelocity = math.sqrt(vx * vx + vy * vy)
-
-    EngineSync.data.isGrounded = types.Actor.isOnGround(self.object)
-
-    EngineSync.data.position = currentPos
-    EngineSync.prevPos = currentPos
+    EngineSync.data.forwardVelocity = speed
 end
 
 return EngineSync

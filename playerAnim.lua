@@ -6,6 +6,7 @@ local I = require('openmw.interfaces')
 
 local Anim = {}
 
+-- Above the engine's Jump (4) and Movement (5); a tie hides both.
 local PRIORITY_FLOW       = animation.PRIORITY.Weapon
 local PRIORITY_FLOW_MAJOR = animation.PRIORITY.Block
 
@@ -19,7 +20,6 @@ local GROUPS = {
     Mantle    = { group = { "pwmantle1", "pwmantle2", "pwmantle3" }, speed = .7,
         priority = PRIORITY_FLOW_MAJOR,
         blendMask = animation.BLEND_MASK.All,
-        autoDisable = true,
         startKey = "start",
         stopKey = "stop",
     },
@@ -79,17 +79,6 @@ local GROUPS = {
 local LOOPING_STATES = { LedgeHang = true, Ladder = true }
 local ONE_SHOT_STATES = { Vault = true, Mantle = true, Roll = true,
                           Shimmy = true, WallBoost = true, WallJump = true }
-
--- Must out-rank the engine: Jump is 4 and Movement is 5, and equal priorities
--- in all four bone groups means NEITHER animation is visible.
-local FULLBODY_PRIORITY = {
-    [animation.BONE_GROUP.RightArm] = PRIORITY_FLOW,
-    [animation.BONE_GROUP.LeftArm] = PRIORITY_FLOW,
-    [animation.BONE_GROUP.Torso] = PRIORITY_FLOW,
-    [animation.BONE_GROUP.LowerBody] = PRIORITY_FLOW,
-}
-local FULLBODY_BLEND_MASK = animation.BLEND_MASK.LeftArm + animation.BLEND_MASK.Torso
-                           + animation.BLEND_MASK.RightArm + animation.BLEND_MASK.LowerBody
 
 local currentGroup = nil
 
@@ -171,9 +160,7 @@ function Anim.verifyGroups()
         end
     end
 
-    -- Probe the GROUP and the named text KEYS. A group that exists but whose
-    -- start key does not is unplayable and silent, which is how a bad key
-    -- survived a release.
+    -- A group whose start key is missing is unplayable and silent.
     for i = 1, #probes do
         local label, group, sk, tk = probes[i][1], probes[i][2], probes[i][3], probes[i][4]
         if not animation.hasGroup(self, group) then
@@ -231,8 +218,8 @@ local function playGroup(stateName, looping)
     animation.playBlended(self, group, {
         startKey = startKey,
         stopKey = stopKey,
-        priority = entry.priority or FULLBODY_PRIORITY,
-        blendMask = entry.blendMask or FULLBODY_BLEND_MASK,
+        priority = entry.priority,
+        blendMask = entry.blendMask,
         speed = entry.speed or 1,
         loops = looping and -1 or 0,
         forceLoop = looping and true or nil,
@@ -252,6 +239,11 @@ reissue = function()
     playGroup(lastRequest.state, lastRequest.looping)
 end
 
+-- Re-resolves the current state's group, picking up a new variant.
+function Anim.replay()
+    if lastRequest then playGroup(lastRequest.state, lastRequest.looping) end
+end
+
 function Anim.onStateChange(newState, oldState)
     if ONE_SHOT_STATES[newState] then
         lastRequest = { state = newState, looping = false }
@@ -261,7 +253,6 @@ function Anim.onStateChange(newState, oldState)
         playGroup(newState, true)
     else
         lastRequest = nil
-        -- Idle, Airborne, or anything else: hand control back to vanilla.
         stopCurrent()
     end
 end

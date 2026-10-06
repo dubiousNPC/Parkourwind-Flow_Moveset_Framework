@@ -22,7 +22,6 @@ local groupOk = pcall(I.Settings.registerGroup, {
     name = "SettingsFLOW_AMF",
     permanentStorage = false,
     settings = {
-        -- [NEW] Master enable/disable
         {
             key = "modEnabled",
             name = "Enable FLOW",
@@ -38,7 +37,7 @@ local groupOk = pcall(I.Settings.registerGroup, {
         {
             key = "debugMode",
             name = "Debug HUD",
-            description = "Shows the live state/sensor readout on screen. Off by default - the HUD redraws and allocates strings every frame, and also forces the sensor to resolve object names it otherwise wouldn't need. Leave off unless diagnosing something.",
+            description = "Shows the live state/sensor readout on screen. Off by default - the HUD redraws ten times a second, and also forces the sensor to resolve object names it otherwise wouldn't need. Leave off unless diagnosing something.",
             default = false, renderer = "checkbox"
         },
     }
@@ -57,19 +56,19 @@ local statesOk = pcall(I.Settings.registerGroup, {
         {
             key = "stateVault",
             name = "Vault",
-            description = "Hurdling knee-to-waist-height obstacles (30-55% of player height). Turning this off also stops the forward obstacle scan when Mantle is off too.",
+            description = "Hurdling knee-to-waist-height obstacles (25-50% of player height). Turning this off also stops the forward obstacle scan when Mantle is off too.",
             default = true, renderer = "checkbox"
         },
         {
             key = "stateMantle",
             name = "Mantle",
-            description = "Climbing onto waist-to-head-height surfaces (56-100% of player height). Also used to climb up from a ledge hang - with this off, hanging still works but you cannot pull yourself over the top.",
+            description = "Climbing onto waist-to-shoulder-height surfaces (51-80% of player height). Also used to climb up from a ledge hang - with this off, hanging still works but you cannot pull yourself over the top.",
             default = true, renderer = "checkbox"
         },
         {
             key = "stateLedgeHang",
             name = "Ledge Hang",
-            description = "Catching overhead ledges in mid-air (120-140% of player height). Turning this off also removes the per-frame ledge probe while airborne, and makes Shimmy and Wall Boost unreachable - both are entered only from a hang.",
+            description = "Catching overhead ledges in mid-air (110-130% of player height). Turning this off also removes the per-frame ledge probe while airborne, and makes Shimmy and Wall Boost unreachable - both are entered only from a hang.",
             default = true, renderer = "checkbox"
         },
         {

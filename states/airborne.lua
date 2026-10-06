@@ -17,6 +17,8 @@ local VaultState = require('states/vault')
 local MantleState = require('states/mantle')
 local Settings = require('settings')
 local Body = require('core/body')
+local Owned = require('core/owned')
+local EngineSync = require('core/engine_sync')
 
 local AirborneState = BaseState.new("Airborne")
 
@@ -37,28 +39,23 @@ local WALL_CONTACT_MARGIN = 8.0
 local WALL_CONTACT_HEIGHT = 70.0
 
 local armed = false
-local timeAirborne = 0          -- seconds since this airborne period began;
-                                 -- gates both the Roll and the WallJump
-local wallJumpUsed = false      -- one wall jump per airborne period. NOT reset
-local isActive = false          -- is Airborne the current state? gates the
+local timeAirborne = 0
+local isActive = false
 local jumpEdge = false
 local wallJumpReadyAt = 0
-local groundedFor = 0
-local GROUND_CONFIRM = 0.15 -- set by the trigger handler, consumed by
+local wallJumpLanding = nil
 local agilityApplied = false
+
+-- One wall jump per confirmed landing, counted by EngineSync.
+local function wallJumpSpent(syncData)
+    return wallJumpLanding ~= nil and wallJumpLanding == syncData.landings
+end
 
 local function applyAgility(enable)
     if enable == agilityApplied then return end
-    local sign = enable and 1 or -1
-
-    local attr = types.Actor.stats.attributes.agility(mwSelf)
-    attr.modifier = attr.modifier + (sign * AGILITY_BONUS)
-
-    local fx = types.Actor.activeEffects(mwSelf)
-    if fx then
-        fx:modify(sign * AGILITY_BONUS, core.magic.EFFECT_TYPE.FortifyAttribute, 'agility')
-    end
-
+    local amount = enable and AGILITY_BONUS or -AGILITY_BONUS
+    Owned.attribute('agility', amount)
+    Owned.effect(core.magic.EFFECT_TYPE.FortifyAttribute, amount, 'agility')
     agilityApplied = enable
 end
 
@@ -99,7 +96,6 @@ input.registerTriggerHandler("Jump", async:callback(function()
         jumpEdge = true
     end
 
-
     if armed then return end
 
     if not Settings.stateEnabled("Roll") then return end
@@ -126,7 +122,7 @@ if I.AnimationController and I.AnimationController.addTextKeyHandler then
 end
 
 function AirborneState.getRollDebug()
-    local wj = wallJumpUsed and " WJ-used"
+    local wj = wallJumpSpent(EngineSync.data) and " WJ-used"
         or (timeAirborne <= WALL_JUMP_WINDOW and " WJ-ready" or "")
 
     if armed then
@@ -142,12 +138,10 @@ local healthBeforeLanding = nil
 function AirborneState:enter(syncData)
     isActive = true
     healthBeforeLanding = types.Actor.stats.dynamic.health(mwSelf).current
-    -- Fresh airborne period starts unarmed.
     armed = false
     timeAirborne = 0
     jumpEdge = false
     landedSignal = false
-
 end
 
 function AirborneState:exit()
@@ -185,13 +179,13 @@ function AirborneState:update(dt, syncData, inputData)
 
     if jumpEdge then
         jumpEdge = false
-        if not wallJumpUsed
+        if not wallJumpSpent(syncData)
            and Sensor.data.tooHigh
            and timeAirborne <= WALL_JUMP_WINDOW
            and core.getRealTime() >= wallJumpReadyAt
            and Settings.stateEnabled("WallJump")
            and wallContact() then
-            wallJumpUsed = true
+            wallJumpLanding = syncData.landings
             wallJumpReadyAt = core.getRealTime() + WALL_JUMP_COOLDOWN
             return "WallJump"
         end
@@ -200,28 +194,20 @@ function AirborneState:update(dt, syncData, inputData)
     local touchedDown = syncData.isGrounded or (landedSignal and armed)
 
     if not touchedDown then
-        groundedFor = 0
         healthBeforeLanding = types.Actor.stats.dynamic.health(mwSelf).current
+        return nil
     end
 
-    -- 2. Landing Logic
-    if touchedDown then
-        landedSignal = false
-        groundedFor = groundedFor + dt
-        if groundedFor >= GROUND_CONFIRM then wallJumpUsed = false end
-        if armed then
-            applyAgility(false)
-            armed = false
-            RollState.setLandingData(healthBeforeLanding)
-            return "Roll"
-        end
-
+    landedSignal = false
+    if armed then
         applyAgility(false)
-
-        return "Idle"
+        armed = false
+        RollState.setLandingData(healthBeforeLanding)
+        return "Roll"
     end
 
-    return nil
+    applyAgility(false)
+    return "Idle"
 end
 
 return AirborneState

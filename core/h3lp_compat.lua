@@ -9,10 +9,9 @@ local function tryRequire(path, vfsPath)
 end
 
 local h3Every = tryRequire('scripts.s3.every', 'scripts/s3/every.lua')
-local h3Cooldown = tryRequire('scripts.s3.cooldown', 'scripts/s3/cooldown.lua')
 
 local H3 = {
-    available = (h3Every ~= nil and h3Cooldown ~= nil),
+    available = (h3Every ~= nil),
 }
 
 print("[FLOW:H3] timer backend: " ..
@@ -33,31 +32,10 @@ local function fallbackEvery(interval)
     end
 end
 
-local function fallbackCooldown(interval)
-    local elapsed = interval  -- starts ready, matching h3lp's cooldown()
-    local last = core.getRealTime()
-    return function()
-        local now = core.getRealTime()
-        elapsed = elapsed + (now - last)
-        last = now
-        if elapsed >= interval then
-            elapsed = 0
-            return true
-        end
-        return false
-    end
-end
-
 -- Returns a closure that fires true once per completed interval.
 function H3.every(interval)
     if h3Every then return h3Every(interval) end
     return fallbackEvery(interval)
-end
-
--- Returns a closure that fires true at most once per interval, starting ready.
-function H3.cooldown(interval)
-    if h3Cooldown then return h3Cooldown(interval) end
-    return fallbackCooldown(interval)
 end
 
 return H3

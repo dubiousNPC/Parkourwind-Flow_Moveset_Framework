@@ -90,13 +90,28 @@ else lives in `RESEARCH.md`.
   `SharedRay_v2`, all declaring version 2, so the first to load wins and FLOW's
   stands down. `core/sensor.lua` resolves the accessor rather than the
   interface, and derives distance from `hitPos`, which every copy provides.
+  That distance is horizontal from the feet: SharedRay's own `distance` is
+  from the camera, which in third person sits behind the reach entirely.
 - **`main.lua`'s `OVERRIDE_STATES` must list every state that holds an
-  `I.Controls` override.** The per-tick safety net releases overrides for any
-  state not in that set, silently, so an unlisted state's override lasts one
-  frame. Currently: Vault, Mantle, LedgeHang, Shimmy, WallBoost, Ladder, Roll.
-- **`wallJumpUsed` clears on touchdown only,** never in `AirborneState:enter`.
-  WallJump exits back into Airborne, so clearing on entry gives an unlimited
-  vertical climb.
+  `I.Controls` override.** The safety net releases overrides once, on the
+  frame FLOW leaves one of those states. It must not release every frame:
+  `overrideMovementControls` is a single shared flag, and a per-frame release
+  cancelled other mods' overrides (HookShot's rappel hang) while FLOW sat in
+  Idle. Currently: Vault, Mantle, LedgeHang, Shimmy, WallBoost, Ladder, Roll.
+- **One wall jump per confirmed landing.** `EngineSync` counts a landing once
+  the feet have been down for `GROUND_CONFIRM`, every frame and in any state.
+  The count used to live in Airborne, which leaves on the first grounded
+  frame, so it never reached the threshold and the move worked once per
+  session. Clearing in `AirborneState:enter` instead gives an unlimited climb,
+  because WallJump exits back into Airborne.
+- **Engine-side changes go through `core/owned.lua`.** Levitate and the stat
+  bonuses are permanent once applied and are written into a save. `Owned`
+  tracks what FLOW holds, `onSave` stores it, `onLoad` undoes it.
+- **Ground state is read every frame.** `EngineSync` used a fixed 10 units per
+  frame as its teleport test and returned before reading `isOnGround`, so at
+  30 fps a running jump never left Idle. The test is now a horizontal speed.
+- **Switching FLOW off, or Disable Indoors, stands the active state down** to
+  Idle first, so its exit releases overrides and Levitate.
 - **`playerAnim.lua`'s `resolveGroup` falls back through pending variant, then
   last played, then any key.** Ladder's variants are up/down/idle with no
   "right", so a replay that sets no variant must not resolve to nil.
@@ -110,7 +125,7 @@ else lives in `RESEARCH.md`.
 ### WallJump, rebuilt
 
 Jump into a wall, then press jump again within 0.45s while still touching it,
-for a boosted second jump straight up. `pwwalljump1`, one-shot. Acrobatics
+for a boosted second jump straight up. `pwwalljump1` or `pwwalljump2`, one-shot. Acrobatics
 scales the apex and is fortified for the launch, alongside a `Jump` active
 effect so the boost reads correctly in the magic menu. Toggle: **Wall Jump**.
 
@@ -119,8 +134,8 @@ here:
 
 | old cause | now |
 |---|---|
-| fixed teleport-lerp toward a spawned platform mesh | ballistic `FLOW_Boost_Start`, nothing spawned |
-| per-tick collision cage clamped the move to zero against the wall | the boost path does no cage work at all |
+| fixed teleport-lerp toward a spawned platform mesh | `FLOW_Hop_Start`, a Z-only curve, nothing spawned |
+| per-tick collision cage clamped the move to zero against the wall | the hop path does no cage work at all |
 | animation group named `pwwalljump`, which does not exist | `pwwalljump1`, verified in all three shipped `.kf` sets |
 
 That third one was the T-pose: a full-body blend mask over a missing group
@@ -131,9 +146,7 @@ handler, so no ray is cast until the player actually asks for a wall jump, and
 the common case (facing the wall) costs one ray. The only per-frame addition
 anywhere is a single `timeAirborne` accumulator.
 
-One wall jump per airborne period, cleared on touchdown rather than on entering
-Airborne — WallJump exits back into Airborne, so clearing on entry would give an
-unlimited vertical climb.
+One wall jump per confirmed landing; see the notes above.
 
 ### Roll is now a committed action
 
@@ -149,7 +162,7 @@ unlimited vertical climb.
 The last three are one mechanism: `overrideMovementControls(true)` suppresses
 jump *and* stops the engine writing `self.controls`, so the state drives movement
 itself. `Roll` is therefore in `main.lua`'s `OVERRIDE_STATES` — without that the
-per-tick safety net releases the override and the roll is silently jumpable and
+safety net releases the override and the roll is silently jumpable and
 stationary.
 
 The fall gate and the wall-jump window also disambiguate the two gestures

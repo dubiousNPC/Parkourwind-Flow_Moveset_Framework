@@ -8,11 +8,6 @@ local Settings = require('settings')
 
 local DebugHUD = {
     element = nil,
-    lines = {
-        state = "State: Init",
-        sensor = "Sensor: Clear",
-        lastAction = "Action: None"
-    }
 }
 
 function DebugHUD.create()
@@ -23,9 +18,9 @@ function DebugHUD.create()
         layer = "HUD",
         type = ui.TYPE.Flex,
         props = {
-            relativePosition = util.vector2(0.7, 0.80), -- Moved up slightly to fit more text
+            relativePosition = util.vector2(0.7, 0.80),
             anchor = util.vector2(0, 1),
-            size = util.vector2(350, 150), -- Increased height for multiline debug
+            size = util.vector2(350, 150),
             horizontal = false,
             arrange = ui.ALIGNMENT.End
         },
@@ -46,8 +41,8 @@ function DebugHUD.create()
                     text = "",
                     textSize = 14,
                     textColor = util.color.rgb(1.0, 1.0, 0.8),
-                    multiline = true, -- [NEW] Required for detailed sensor output
-                    autoSize = true   -- [NEW] Allows text to expand the widget
+                    multiline = true,
+                    autoSize = true
                 }
             },
             {
@@ -84,7 +79,6 @@ function DebugHUD.update(stateName, sensorInfo, actionName)
         dirty = true
     end
 
-    -- Only update if provided, allows persistence
     if actionName then
         local actionText = "LAST OP: " .. tostring(actionName)
         if DebugHUD.lastAction ~= actionText then

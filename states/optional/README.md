@@ -1,15 +1,8 @@
 # Optional states: WallRun
 
-**Sprint is back in the default build** (`states/sprint.lua`) - it's now
-the mod's performance controller (see `main.lua`'s `IDLE_THROTTLE_INTERVAL`
-and `states/sprint.lua`'s header comment), not just a gameplay feature, so
-it needs to always be present.
-
-**WallRun** is still the only thing kept out, for the same reason as
-before: it needs its own continuous side-scan raycast
+**WallRun** is kept out of the default build: it needs its own continuous side-scan raycast
 (`core/optional/sensor_ext.lua`'s `updateWallRun`) that doesn't fit
-through the single SharedRay detection ray Vault/Mantle/LedgeHang/WallJump
-all use. Pulling it out was purely a performance call, not a
+through the shared detection rays the other states use. Pulling it out was purely a performance call, not a
 functionality one.
 
 Currently: not required anywhere, not registered, zero runtime cost.
@@ -29,3 +22,6 @@ Currently: not required anywhere, not registered, zero runtime cost.
    - add a check against `SensorExt.data.wallRun.side`, matching the
      pattern already in `states/optional/wall_run.lua`'s own comments/use
      of that data.
+
+3. **core/engine_sync.lua** - `wall_run.lua` reads `syncData.verticalVelocity`,
+   which EngineSync does not provide. Add it before re-enabling.

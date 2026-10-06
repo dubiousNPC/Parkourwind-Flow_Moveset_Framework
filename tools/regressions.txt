@@ -56,9 +56,10 @@ why: a state may refuse on entry. Announcing and animating before checking abort
 needs: StateManager.activeState.abort
 
 file: core/sensor.lua
-why: SharedRay's interface SHAPE is not guaranteed by its version number. Reading ray.distance directly raised 'attempt to compare nil with number' 1604 times in one session; the distance must be derived from hitPos.
+why: SharedRay's interface SHAPE is not guaranteed by its version number. Reading ray.distance directly raised 'attempt to compare nil with number' 1604 times in one session; the distance must be derived from hitPos. It is also measured from the feet: ray.distance is from the camera.
 needs: I.SharedRay.getUnclipped or I.SharedRay.get
-needs: type(dist) ~= "number"
+needs: ray.hitPos - pos
+needs: not-present ray.distance
 
 file: core/sensor.lua
 why: height bands are derived from PLAYER_HEIGHT fractions. Hand-tuned unit constants are what put the spread of influence wrong - MIN_VAULT_HEIGHT at 25 offered a vault over an ankle-high curb.
@@ -132,8 +133,9 @@ why: WallJump uses the Hop move type, not Boost. Boost integrates a velocity and
 needs: Hop
 
 file: states/airborne.lua
-why: wallJumpUsed must NOT be cleared in enter(). WallJump exits back into Airborne, so clearing on entry re-arms the move at the top of every wall jump and gives an unlimited vertical climb. Touchdown clears it.
-needs: wallJumpUsed = false
+why: the wall jump must NOT re-arm in enter(). WallJump exits back into Airborne, so re-arming on entry gives an unlimited vertical climb. It re-arms on the next confirmed landing, counted by EngineSync.
+needs: wallJumpLanding = syncData.landings
+needs: not-present wallJumpUsed = false
 
 # NOTE ON WHAT CANNOT BE GUARDED HERE. This record first also carried
 # `needs: velocity_getter_research.md`, pointing at the doc that explains the
@@ -172,9 +174,10 @@ file: core/sensor.lua
 why: WallJump reads Sensor.data.tooHigh - a top surface that exists but sits above the Mantle band. Without it, a featureless wall offers no action at all, every rung refuses, and repeated presses wall-jump up a flat face.
 needs: tooHigh
 
-file: states/airborne.lua
-why: wallJumpUsed clears only after the feet have been down for GROUND_CONFIRM. A single frame of isGrounded next to geometry re-armed the move mid-climb.
+file: core/engine_sync.lua
+why: a landing counts only after the feet have been down for GROUND_CONFIRM. A single frame of isGrounded next to geometry re-armed the wall jump mid-climb. Counted here, every frame: Airborne leaves on the first grounded frame, so a count kept there never reached the threshold.
 needs: GROUND_CONFIRM
+needs: landings
 
 file: states/wall_jump.lua
 why: Levitate is held for the duration of the hop. The hop drives Z absolutely while engine gravity keeps accumulating, so without it the actor drops at full accumulated speed the instant the hop ends - the "sudden teleport" feel.
@@ -184,3 +187,29 @@ needs: BRACE_DURATION
 file: playerAnim.lua
 why: verifyGroups probes the text KEYS as well as the group. A group that exists but whose named start key does not is unplayable and silent, which is how a bad key survived a release.
 needs: getTextKeyTime
+
+file: core/engine_sync.lua
+why: isOnGround must be read every frame, before the teleport test. A fixed 10 units/frame test returned first, so at 30 fps a running jump never left Idle.
+needs: updateGround(dt)
+needs: TELEPORT_SPEED
+
+file: main.lua
+why: overrideMovementControls is one shared flag. Releasing it every frame outside FLOW's own states cancelled HookShot's rappel hang. Release once, on leaving an override state.
+needs: overrideHeld
+
+file: main.lua
+why: Levitate and stat bonuses are written into a save made mid-move. onLoad undoes what onSave recorded.
+needs: Owned.undo
+needs: onSave = onSave
+
+file: main.lua
+why: switching FLOW off or Disable Indoors returned before the active state could exit, leaving overrides and Levitate on.
+needs: standDown()
+
+file: playerAnim.lua
+why: ladder.lua calls Anim.replay on every direction change. It did not exist, so each change raised and the up/down/idle clip never switched.
+needs: function Anim.replay
+
+file: states/wall_boost.lua
+why: acrobatics is a skill. FortifyAttribute with 'acrobatics' made a junk magic-menu entry.
+needs: EFFECT_TYPE.FortifySkill

@@ -3,7 +3,7 @@
 local core = require('openmw.core')
 local mwSelf = require('openmw.self')
 local util = require('openmw.util')
-local types = require('openmw.types')
+local Owned = require('core/owned')
 local I = require('openmw.interfaces')
 local BaseState = require('states/base_state')
 local Anim = require('playerAnim')
@@ -12,8 +12,8 @@ local EngineSync = require('core/engine_sync')
 local WallBoostState = BaseState.new("WallBoost")
 
 local APEX_HEIGHT = 160.0     -- peak height above the launch point
-local MAX_DURATION = 1.4      -- hard cap; the backend normally ends it earlier
-local MIN_STATE_TIME = 0.25   -- don't hand off before the arc visibly starts
+local MAX_DURATION = 1.4      -- backend cap
+local MIN_STATE_TIME = 0.25   -- hands off to Airborne after this; exit cancels the boost
 
 local ACROBATICS_BONUS = 40
 
@@ -30,16 +30,9 @@ local boostApplied = false
 
 local function applyAcrobatics(enable)
     if enable == boostApplied then return end
-    local sign = enable and 1 or -1
-
-    local skill = types.NPC.stats.skills.acrobatics(mwSelf)
-    skill.modifier = skill.modifier + (sign * ACROBATICS_BONUS)
-
-    local fx = types.Actor.activeEffects(mwSelf)
-    if fx then
-        fx:modify(sign * ACROBATICS_BONUS, core.magic.EFFECT_TYPE.FortifyAttribute, 'acrobatics')
-    end
-
+    local amount = enable and ACROBATICS_BONUS or -ACROBATICS_BONUS
+    Owned.skill('acrobatics', amount)
+    Owned.effect(core.magic.EFFECT_TYPE.FortifySkill, amount, 'acrobatics')
     boostApplied = enable
 end
 
@@ -81,11 +74,6 @@ end
 
 function WallBoostState:update(dt, syncData, inputData)
     timeInState = timeInState + dt
-
-    -- Absolute safety net - the backend should always end the arc first.
-    if timeInState > MAX_DURATION + 0.1 then
-        return "Airborne"
-    end
 
     if timeInState < MIN_STATE_TIME then
         return nil

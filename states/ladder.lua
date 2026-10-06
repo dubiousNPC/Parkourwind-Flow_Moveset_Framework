@@ -3,12 +3,12 @@
 local core = require('openmw.core')
 local mwSelf = require('openmw.self')
 local util = require('openmw.util')
-local types = require('openmw.types')
 local nearby = require('openmw.nearby')
 local I = require('openmw.interfaces')
 local BaseState = require('states/base_state')
 local Anim = require('playerAnim')
 local Settings = require('settings')
+local Owned = require('core/owned')
 
 local LadderState = BaseState.new("Ladder")
 
@@ -77,9 +77,7 @@ local lastDir = 0          -- -1 down, 0 idle, +1 up
 
 local function applyLevitate(enable)
     if enable == levitateApplied then return end
-    types.Actor.activeEffects(mwSelf):modify(
-        enable and LEVITATE_MAG or -LEVITATE_MAG,
-        core.magic.EFFECT_TYPE.Levitate)
+    Owned.effect(core.magic.EFFECT_TYPE.Levitate, enable and LEVITATE_MAG or -LEVITATE_MAG)
     levitateApplied = enable
 end
 

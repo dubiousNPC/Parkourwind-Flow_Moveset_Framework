@@ -2,6 +2,7 @@
 local core = require('openmw.core')
 local mwSelf = require('openmw.self')
 local types = require('openmw.types')
+local Owned = require('core/owned')
 local BaseState = require('states/base_state')
 local Body = require('core/body')
 
@@ -31,24 +32,15 @@ local pendingRise = 0
 
 local function applyLevitate(enable)
     if enable == levitating then return end
-    local fx = types.Actor.activeEffects(mwSelf)
-    if not fx then return end
-    fx:modify(enable and LEVITATE_MAG or -LEVITATE_MAG, core.magic.EFFECT_TYPE.Levitate)
+    Owned.effect(core.magic.EFFECT_TYPE.Levitate, enable and LEVITATE_MAG or -LEVITATE_MAG)
     levitating = enable
 end
 
 local function applyJumpFortify(enable)
     if enable == boostApplied then return end
-    local sign = enable and 1 or -1
-
-    local skill = types.NPC.stats.skills.acrobatics(mwSelf)
-    skill.modifier = skill.modifier + (sign * ACROBATICS_BONUS)
-
-    local fx = types.Actor.activeEffects(mwSelf)
-    if fx then
-        fx:modify(sign * ACROBATICS_BONUS, core.magic.EFFECT_TYPE.Jump)
-    end
-
+    local amount = enable and ACROBATICS_BONUS or -ACROBATICS_BONUS
+    Owned.skill('acrobatics', amount)
+    Owned.effect(core.magic.EFFECT_TYPE.Jump, amount)
     boostApplied = enable
 end
 
