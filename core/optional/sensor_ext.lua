@@ -6,13 +6,17 @@ local util = require('openmw.util')
 local Settings = require('settings')
 local Body = require('core/body')
 
--- Overhead ledges, 110-130% of actor height. See README.
-local GRAB_MIN_FRAC = 1.10
-local GRAB_MAX_FRAC = 1.30
+-- Overhead ledges. HANDS_FRAC is where the hands reach, 110% of actor height.
+-- The probe spans well above and below it: this runs ONLY while airborne, from
+-- the player's CURRENT feet, so a window measured from the band alone travels
+-- upward with the jump and a 30-unit span passes a given lip in two frames.
+local HANDS_FRAC = 1.10
+local PROBE_ABOVE = 0.20   -- ceiling 130% of height, the design limit
+local PROBE_BELOW = 0.25   -- floor 85%, so a lip is caught while rising to it
 
 local LIP_PROBE_RISE = 4.0
 
-local WALL_PROBE_DROP = 10.0
+local WALL_PROBE_DROP = 0.15   -- as a fraction of height, below the hands
 
 local SensorExt = {
     SIDE_REACH = 100,
@@ -35,15 +39,17 @@ local SensorExt = {
     }
 }
 
-function SensorExt.grabMinHeight() return Body.frac(GRAB_MIN_FRAC) end
-function SensorExt.grabMaxHeight() return Body.frac(GRAB_MAX_FRAC) end
+-- Hands height, and the floor/ceiling of what they can catch.
+function SensorExt.grabMinHeight() return Body.frac(HANDS_FRAC) end
+function SensorExt.grabFloorHeight() return Body.frac(HANDS_FRAC - PROBE_BELOW) end
+function SensorExt.grabMaxHeight() return Body.frac(HANDS_FRAC + PROBE_ABOVE) end
 
 -- Height the forward wall ray is cast at. NOT the catch height.
-function SensorExt.wallProbeHeight() return SensorExt.grabMinHeight() - WALL_PROBE_DROP end
+function SensorExt.wallProbeHeight() return Body.frac(HANDS_FRAC - WALL_PROBE_DROP) end
 
 -- From just above the band ceiling down to the band floor.
 function SensorExt.ledgeDrop()
-    return (SensorExt.grabMaxHeight() + LIP_PROBE_RISE) - SensorExt.grabMinHeight()
+    return (SensorExt.grabMaxHeight() + LIP_PROBE_RISE) - SensorExt.grabFloorHeight()
 end
 
 local RAY_OPTS = { ignore = self.object }

@@ -13,7 +13,7 @@ reach of everything else.
 |---|---|---|
 | 1 | **Vault** | 25-50% of height, destination not blocked |
 | 2 | **Mantle** | 51-80%, destination not blocked |
-| 3 | **LedgeHang** | 110-130%, lip above hand height, **and the camera aimed at or above the lip** |
+| 3 | **LedgeHang** | hands can reach the lip (85-130% of height), lip above the catch floor, **and the camera looking at or above level** |
 | 4 | **WallJump** | all three refused, wall contact, forward held, off cooldown |
 
 Resolved in `states/airborne.lua`'s `update`, in that order. From the ground,
@@ -27,6 +27,24 @@ WallJump is driven by a jump **edge**, not held jump: the trigger handler sets a
 flag and the ladder consumes it, so the three lower rungs get first refusal on
 the same frame. Holding jump keeps Vault, Mantle and LedgeHang live as before.
 The wall ray is only cast once the ladder reaches rung 4.
+
+## LedgeHang reach
+
+The detector runs **only while airborne**, from the player's current feet, so
+anything measured purely as a band above the feet travels upward with the jump.
+A window equal to the design band alone (110-130% of height, 30 units) left a
+given lip inside it for about two frames, which is why LedgeHang stopped firing
+at all.
+
+The window is therefore anchored on the hands and deliberately wider than the
+band: `HANDS_FRAC` 110%, `PROBE_BELOW` 25% and `PROBE_ABOVE` 20% give a 62-unit
+span, so a lip is caught while rising to it. 130% remains the ceiling.
+
+The aim test compares the **look direction** - camera position to whatever the
+camera ray hit - rather than that hit's absolute height. The absolute form
+rejected any shot that landed on the wall below the lip, which is most of them.
+Direction also avoids depending on a pitch sign convention, which is not
+documented.
 
 ## Animation assets
 

@@ -72,13 +72,14 @@ why: the Vault height cap must apply to THIN obstacles too. Without it a chest-h
 needs: vaultHeight
 
 file: core/optional/sensor_ext.lua
-why: the LedgeHang catch band must be declared, not emergent. It used to fall out of a cast height, a hard-coded +40 and a 60-unit drop, which multiplied out to 90-137% of player height and overlapped Mantle's band.
-needs: GRAB_MIN_FRAC
-needs: GRAB_MAX_FRAC
+why: the LedgeHang window is anchored on HANDS_FRAC and spans PROBE_BELOW..PROBE_ABOVE around it. The detector runs only while airborne, from the player's current feet, so a window equal to the design band alone travels upward with the jump: at a 30-unit span a given lip was inside it for about two frames, which is why LedgeHang stopped firing.
+needs: HANDS_FRAC
+needs: PROBE_ABOVE
+needs: PROBE_BELOW
 
 file: states/airborne.lua
-why: the LedgeHang reach check measures against the band floor, not the wall-probe height. GRAB_HEIGHT sits below the band on purpose, so reading it here let the grab reach slightly downwards.
-needs: SensorExt.grabMinHeight()
+why: the LedgeHang reach check measures against grabFloorHeight, the bottom of what the hands can catch - not the hands height itself, and not the wall-probe height, which sits lower still. Reading the wrong one either rejects every reachable lip or lets the grab pull downwards.
+needs: SensorExt.grabFloorHeight()
 
 file: main.lua
 why: the throttle gate reads self.controls.run. Written as mwSelf - the idiom every other file uses - it indexed an undeclared global and threw every frame, killing Sensor, SensorExt, StateManager and the HUD while init still logged normally.
@@ -213,3 +214,11 @@ needs: function Anim.replay
 file: states/wall_boost.lua
 why: acrobatics is a skill. FortifyAttribute with 'acrobatics' made a junk magic-menu entry.
 needs: EFFECT_TYPE.FortifySkill
+
+file: states/airborne.lua
+why: the ledge aim test uses the look DIRECTION (camera position to the camera's hit), not the hit's absolute Z. Comparing absolute Z to the lip rejected any shot that landed on the wall below it, which is most of them, and that is why LedgeHang appeared dead. Direction is also free of any pitch sign convention.
+needs: camera.getPosition()
+
+file: global/flow_amf_backend.lua
+why: teleport reinserts the actor into the physics world and is the most expensive call in this file. Every move eases out, so its final frames are sub-unit and the teleport is wasted.
+needs: MIN_STEP_SQ

@@ -4,6 +4,8 @@ local util = require('openmw.util')
 
 local ActiveMoves = {}
 
+local MIN_STEP_SQ = 0.25   -- 0.5 units
+
 local function bezier(t, p0, p1, p2)
     local u = 1 - t
     local tt = t * t
@@ -161,8 +163,15 @@ local function onUpdate(dt)
                 end
             end
 
+            -- Skip a teleport that would not move the actor. Every move eases
+            -- out, so its last frames are sub-unit; teleport reinserts the
+            -- actor into the physics world and is the most expensive call here.
             if nextPos then
-                actor:teleport(actor.cell, nextPos, { onGround = false, rotation = actor.rotation })
+                local p = actor.position
+                local dx, dy, dz = nextPos.x - p.x, nextPos.y - p.y, nextPos.z - p.z
+                if dx * dx + dy * dy + dz * dz > MIN_STEP_SQ then
+                    actor:teleport(actor.cell, nextPos, { onGround = false, rotation = actor.rotation })
+                end
             end
         end
     end

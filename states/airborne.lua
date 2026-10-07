@@ -3,6 +3,7 @@
 local BaseState = require('states/base_state')
 local core = require('openmw.core')
 local I = require('openmw.interfaces')
+local camera = require('openmw.camera')
 local input = require('openmw.input')
 local async = require('openmw.async')
 local types = require('openmw.types')
@@ -24,8 +25,7 @@ local AirborneState = BaseState.new("Airborne")
 
 local AGILITY_BONUS = 70
 
-local LEDGE_GRAB_TOLERANCE = 20
-local LEDGE_AIM_TOLERANCE = 40
+local LEDGE_AIM_DROP = 16   -- how far below level still counts as looking up
 
 local FORWARD_DEADZONE = 0.1
 
@@ -71,7 +71,10 @@ local function lookingAtLedge(targetPos)
     if not get then return true end
     local ray = get()
     if not (ray and ray.hit and ray.hitPos) then return true end
-    return ray.hitPos.z >= targetPos.z - LEDGE_AIM_TOLERANCE
+    -- Look DIRECTION, camera to what the camera hit: sign-free, and it does not
+    -- care how far away the hit is. Comparing the hit's absolute Z to the lip
+    -- rejected any shot that landed on the wall below it, which is most of them.
+    return (ray.hitPos.z - camera.getPosition().z) > -LEDGE_AIM_DROP
 end
 
 -- One ray, straight ahead, cast only on the keypress.
@@ -169,7 +172,7 @@ function AirborneState:update(dt, syncData, inputData)
 
         if SensorExt.data.interaction == "LedgeHang" and SensorExt.data.targetPos
            and lookingAtLedge(SensorExt.data.targetPos) then
-            local handsZ = mwSelf.position.z + SensorExt.grabMinHeight() - LEDGE_GRAB_TOLERANCE
+            local handsZ = mwSelf.position.z + SensorExt.grabFloorHeight()
             if SensorExt.data.targetPos.z > handsZ then
                 jumpEdge = false
                 return "LedgeHang"
