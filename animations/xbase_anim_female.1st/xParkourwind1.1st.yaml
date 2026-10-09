@@ -1,0 +1,37 @@
+blending_rules:
+  # Base: the documented reasonable range is 0.2-0.4s.
+  - from: "*"
+    to: "*"
+    easing: "sineOut"
+    duration: 0.25
+
+  # Bottom-most rule wins. FLOW's clips are short; a blend longer than a
+  # third of the clip means it never fully asserts before it ends.
+  - from: "*"
+    to: "pwboostbkl: *"
+    easing: "sineOut"
+    duration: 0.17   # clip is 0.5s
+  - from: "*"
+    to: "pwboostbkr: *"
+    easing: "sineOut"
+    duration: 0.17   # clip is 0.5s
+  - from: "*"
+    to: "pwvault1: *"
+    easing: "sineOut"
+    duration: 0.13   # clip is 0.4s
+  - from: "*"
+    to: "pwvault2: *"
+    easing: "sineOut"
+    duration: 0.13   # clip is 0.4s
+  - from: "*"
+    to: "pwvault3: *"
+    easing: "sineOut"
+    duration: 0.13   # clip is 0.4s
+  - from: "*"
+    to: "pwwalljump1: *"
+    easing: "sineOut"
+    duration: 0.08   # clip is 0.23s
+  - from: "*"
+    to: "pwwalljump2: *"
+    easing: "sineOut"
+    duration: 0.08   # clip is 0.23s
