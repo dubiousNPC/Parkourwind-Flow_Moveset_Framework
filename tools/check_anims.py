@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""check_anims.py - every group playerAnim.lua plays must exist in every .kf set.
+
+THE BUG CLASS. `animation.playBlended` on a group the actor's skeleton does not
+define is a SILENT no-op: no error, no clip, and the actor keeps the pose it
+had. Nothing in the log says so. Two live examples found by this check:
+
+  * pwwalljump2 existed in ONE of six sets while playerAnim listed it as a
+    random alternative to pwwalljump1, so half of all wall jumps played nothing.
+  * the three .1st sets key shimmy pwshimmy1l/pwshimmy1r and the three
+    third-person sets pwshimmyl1/pwshimmyr1, so one naming is always silent.
+
+OpenMW resolves animation sources per skeleton and does NOT fall back to
+xbase_anim: third person loads base_anim.nif, or base_animkna.nif for beasts,
+plus base_anim_female.nif for non-beast females; first person always loads
+base_anim.1st.nif and adds base_animkna.1st.nif or base_anim_female.1st.nif.
+So a group is only playable for the players whose set declares it.
+
+Text keys are read LENGTH-PREFIXED. A regex sweep runs past one string's length
+prefix into the next and invents keys that do not exist; that mistake once
+broke Mantle, LedgeHang and left-Shimmy for two releases.
+
+Usage:  check_anims.py <mod-root>
+Exit 0 clean, 1 if any slot is unplayable on some skeleton, 2 on a setup problem.
+"""
+import glob
+import os
+import re
+import struct
+import sys
+
+KEYLINE = re.compile(r'^\s*([A-Za-z][\w ]*?)\s*:\s*(.+?)\s*$')
+QUOTED = re.compile(r'"(pw[a-z0-9]+)"')
+
+
+def kf_keys(path):
+    """{group: {key: time}}, read length-prefixed."""
+    data = open(path, 'rb').read()
+    out, i, n = {}, 0, len(data)
+    while i < n - 4:
+        ln = struct.unpack_from('<I', data, i)[0]
+        if 2 <= ln <= 256 and i + 4 + ln <= n:
+            raw = data[i + 4:i + 4 + ln]
+            if all(32 <= c < 127 or c in (10, 13) for c in raw):
+                t = None
+                if i >= 4:
+                    (f,) = struct.unpack_from('<f', data, i - 4)
+                    if 0.0 <= f <= 10000.0:
+                        t = f
+                if t is not None:
+                    for line in raw.decode('ascii', 'replace').splitlines():
+                        m = KEYLINE.match(line)
+                        if m:
+                            out.setdefault(m.group(1).strip().lower(), {})[
+                                m.group(2).strip().lower()] = t
+                i += 4 + ln
+                continue
+        i += 1
+    return out
+
+
+def braced(src, i):
+    """src[i] is '{'. Returns (inner text, index after the matching '}')."""
+    depth = 0
+    for j in range(i, len(src)):
+        if src[j] == '{':
+            depth += 1
+        elif src[j] == '}':
+            depth -= 1
+            if depth == 0:
+                return src[i + 1:j], j + 1
+    raise ValueError('unbalanced brace')
+
+
+def slots(root):
+    """[(label, [interchangeable group names])] from playerAnim.lua's GROUPS.
+
+    A `variants` direction is its OWN slot: up, down and idle are different
+    clips, not alternatives, so a missing pwladderup must not be excused by a
+    present pwladderdwn. Only a list under `group` is interchangeable.
+    """
+    src = open(os.path.join(root, 'playerAnim.lua'), encoding='utf-8').read()
+    body, _ = braced(src, src.index('{', src.index('local GROUPS')))
+    found = []
+    for m in re.finditer(r'(\w+)\s*=\s*\{', body):
+        state = m.group(1)
+        if state in ('variants',):
+            continue
+        entry, _ = braced(body, m.end() - 1)
+        vm = re.search(r'variants\s*=\s*\{', entry)
+        if vm:
+            inner, _ = braced(entry, vm.end() - 1)
+            for d in re.finditer(r'(\w+)\s*=\s*(\{[^}]*\}|"pw[a-z0-9]+")', inner):
+                names = QUOTED.findall(d.group(2))
+                if names:
+                    found.append(('%s/%s' % (state, d.group(1)), names))
+        else:
+            gm = re.search(r'group\s*=\s*(\{[^}]*\}|"pw[a-z0-9]+")', entry)
+            names = QUOTED.findall(gm.group(1)) if gm else []
+            if names:
+                found.append((state, names))
+    return found
+
+
+def main(argv):
+    if not argv:
+        print(__doc__)
+        return 2
+    root = argv[0]
+    anim_root = os.path.join(root, 'animations')
+    if not os.path.isdir(anim_root):
+        print('no animations/ under %s' % root)
+        return 2
+
+    sets = {}
+    for d in sorted(os.listdir(anim_root)):
+        files = sorted(glob.glob(os.path.join(anim_root, d, '*.kf')))
+        if files:
+            merged = {}
+            for f in files:
+                merged.update(kf_keys(f))
+            sets[d] = merged
+    if not sets:
+        print('no .kf files found')
+        return 2
+
+    names = sorted(sets)
+    found = slots(root)
+    if not found:
+        print('parsed no group names out of playerAnim.lua')
+        return 2
+
+    print('skeleton sets: %s' % ', '.join(names))
+    print('slots playerAnim can play: %d\n' % len(found))
+
+    bad = 0
+    for label, alts in found:
+        broken = []
+        for d in names:
+            ok = [g for g in alts
+                  if 'start' in sets[d].get(g, {}) and 'stop' in sets[d].get(g, {})]
+            if not ok:
+                broken.append(d)
+        if broken:
+            bad += 1
+            print('  UNPLAYABLE %-16s %s  -> no clip in: %s'
+                  % (label, '/'.join(alts), ', '.join(broken)))
+        else:
+            print('  ok         %-16s %s' % (label, '/'.join(alts)))
+
+    print('\nclip lengths (stop - start), per set:')
+    every = sorted({g for alts in (a for _, a in found) for g in alts})
+    print('  %-16s %s' % ('group', ''.join('%-14s' % d[:13] for d in names)))
+    for g in every:
+        cells = []
+        for d in names:
+            k = sets[d].get(g, {})
+            if 'start' in k and 'stop' in k:
+                cells.append('%-14s' % ('%.3f' % (k['stop'] - k['start'])))
+            elif 'start' in k:
+                cells.append('%-14s' % 'NO-STOP')
+            else:
+                cells.append('%-14s' % '-')
+        print('  %-16s %s' % (g, ''.join(cells)))
+
+    if bad:
+        print('\nFAIL  %d slot(s) unplayable on at least one skeleton' % bad)
+        return 1
+    print('\nOK    every slot has a playable clip on every skeleton')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

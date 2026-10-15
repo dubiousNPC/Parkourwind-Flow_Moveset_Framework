@@ -59,27 +59,56 @@ claimed otherwise and set Mantle, LedgeHang and left-Shimmy to `startxw` /
 a regex that ran past each string's length prefix into the next string. Read
 `.kf` strings length-prefixed, or just read the verifyGroups log.
 
-One real asset gap was found and has since been fixed upstream: `pwladderup`
-was missing its `stop` key in every set except first-person.
+`tools/check_anims.py` is the mechanical version of that probe: it reads the
+text keys out of every shipped `.kf` length-prefixed, pulls the group names out
+of `playerAnim.lua`, and reports any slot with no playable clip on some
+skeleton. Each `variants` direction is its own slot, because up, down and idle
+are different clips rather than alternatives.
+
+**Skeletons do not fall back.** Third person loads `base_anim.nif`, or
+`base_animkna.nif` for beasts, plus `base_anim_female.nif` for non-beast
+females. First person always loads `base_anim.1st.nif` and adds
+`base_animkna.1st.nif` or `base_anim_female.1st.nif`. A group is therefore
+only playable for the players whose own set declares it, and an undefined group
+is a silent no-op. `resolveGroup` filters a list of interchangeable clips by
+`animation.hasGroup` for that reason, caching the answer and dropping the cache
+on an AnimRefresh callback, since a POV switch changes the answer.
 
 Measured clip lengths, used to set state durations, animation speeds and blend
-times:
+times. `xbase_animkna` (beast, third person) is the odd one out:
 
-| clip | length |
-|---|---|
-| `pwwalljump1/2` | 0.23s |
-| `pwvault1/2/3`, `pwmantle1/2/3` | 0.40s |
-| `pwboostbkl/r`, `pwropeidle` | 0.50s |
-| `pwladderidle` | 0.83s |
-| `pwropeup/dwn` | 1.00s |
-| `pwroll1`, `pwshimmyl1/r1`, `pwwallhangidle` | 1.07s |
-| `pwrun1` | 1.33s |
-| `pwladderdwn` | 2.50s |
-| `pwladderup` | 2.83s |
+| clip | length | `xbase_animkna` |
+|---|---|---|
+| `pwwalljump1` | 0.667s | 0.23s |
+| `pwwalljump2` | absent | 0.23s |
+| `pwvault1/2/3`, `pwmantle1/2/3` | 0.40s | same |
+| `pwboostbkl/r`, `pwropeidle` | 0.50s | same |
+| `pwladderidle` | 0.83s | same |
+| `pwropeup/dwn` | 1.00s | same |
+| `pwroll1`, `pwwallhangidle` | 1.07s | same |
+| shimmy left / right | 1.07s | 2.00s / 1.27s |
+| `pwrun1` | 1.50s | 1.33s |
+| `pwladderdwn` | 2.50s | same |
+| `pwladderup` | 2.87s | **no `stop` key** |
 
-A state that ends before its clip cuts the animation, and a clip much shorter
-than its move is invisible. WallJump plays its 0.23s clip at `speed = 0.45` so
-it spans the hop instead of flashing.
+Shimmy is keyed `pwshimmyl1`/`pwshimmyr1` in the three third-person sets and
+`pwshimmy1l`/`pwshimmy1r` in the three `.1st` sets. Both spellings are listed
+as interchangeable so either POV resolves.
+
+A state that ends before its clip cuts the animation, because leaving the state
+cancels the group. Visible time is `min(state window, clip / speed)`:
+
+| state | window | clip / speed |
+|---|---|---|
+| Vault | `0.45 + dist/500 + 0.06` ≈ 0.71s | 0.40 / 0.8 = 0.50s |
+| Mantle | `max(0.58, rise/200) + 0.06` ≥ 0.64s | 0.40 / 0.7 = 0.57s |
+| Roll | 1.07s | 1.067 / 1 = 1.07s |
+| WallBoost | 0.52s | 0.50 / 1 = 0.50s |
+| WallJump | `0.10 + 0.55 + 0.10` = 0.75s | 0.667 / 1 = 0.67s |
+
+Shimmy is the exception: it ends on travelled distance, not a clock, and hands
+back to LedgeHang after each 30-unit step, so only as much of the 1.07s clip
+plays as one step takes.
 
 **Priority.** The engine plays its jump at `PRIORITY.Jump` (4) and locomotion at
 `Movement` (5). Equal priority in all four bone groups means *neither* animation
@@ -89,7 +118,9 @@ ground. The default is `Weapon` (7); committed poses use `Block` (8).
 **Blending.** `animations/*/xParkourwind1*.yaml` carries the blend rules. A
 blend longer than about a third of the clip never fully asserts, and these clips
 are short, so the wildcard base is 0.25s with shorter bottom-most overrides per
-group. Bottom-most rule wins.
+group. Bottom-most rule wins. The overrides are sized against clip length
+*after* `speed`, which is why mantle's 0.4s clip gets 0.18s and vault's gets
+0.13s.
 
 ## Implementation notes
 
@@ -136,6 +167,13 @@ else lives in `RESEARCH.md`.
 - **`reissue()` checks `animation.isPlaying` before replaying.** AnimRefresh v4
   delivers on subscribe and twice on load, so it is called when nothing was
   lost; without the check, entering a cell while hanging restarts the pose.
+- **`states/vault.lua`'s `apexPos` is a Bézier CONTROL point, not the arc's
+  peak.** The backend evaluates `bezier(t, startPos, apexPos, landPos)`, whose
+  peak at `t=0.5` is `0.25*start + 0.5*apex + 0.25*land`. `apexZ` solves that
+  for the required peak, so the knob that sets vault arc height is
+  `PEAK_SAFETY_CLEARANCE` (the curve peaks that far above the obstacle).
+  `MIN_APEX_RISE` clamps the control point and never binds in the 25-50% band:
+  the solved control point is already `1.5 * obstacle + 2 * clearance`.
 - **`core/h3lp_compat.lua` prints its live timer backend once at load.** h3lp is
   a soft dependency tested with `vfs.fileExists`, so which implementation is
   running is otherwise unanswerable from a log.

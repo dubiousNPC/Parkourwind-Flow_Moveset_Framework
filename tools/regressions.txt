@@ -222,3 +222,26 @@ needs: camera.getPosition()
 file: global/flow_amf_backend.lua
 why: teleport reinserts the actor into the physics world and is the most expensive call in this file. Every move eases out, so its final frames are sub-unit and the teleport is wasted.
 needs: MIN_STEP_SQ
+
+file: playerAnim.lua
+why: a list of interchangeable clips must be filtered by animation.hasGroup. pwwalljump2 exists in one of six .kf sets while playerAnim listed it as a random alternative, so half of all wall jumps played nothing - playBlended on an undefined group is a silent no-op. Shimmy depends on the same filter: the .1st sets key it pwshimmy1l/1r and the third-person sets pwshimmyl1/r1.
+needs: groupExists
+needs: pickAvailable
+needs: pwshimmy1l
+needs: pwshimmy1r
+
+file: playerAnim.lua
+why: the availability cache must be dropped on a model rebuild. First and third person load different animation sources, so an answer cached in one POV is wrong in the other.
+needs: forgetGroupAvailability
+
+file: playerAnim.lua
+why: WallJump speed tracks the clip. The clip was re-authored from 0.23s to 0.667s and speed 0.45 then stretched it to 1.48s against a 0.75s state, cutting it at half.
+needs: speed = 1.0
+
+file: states/mantle.lua
+why: MIN_DURATION must not be shorter than pwmantle at its play speed - 0.4s at speed .7 is 0.571s. At 0.35 a low mantle cut the clip at 72%.
+needs: MIN_DURATION = 0.58
+
+file: states/wall_boost.lua
+why: MIN_STATE_TIME must outlast pwboostbk* (0.5s). Leaving the state cancels the group, so 0.25 showed half the clip.
+needs: MIN_STATE_TIME = 0.52

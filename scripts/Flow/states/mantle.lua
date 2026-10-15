@@ -22,7 +22,7 @@ local DEST_RAY_OPTS = {
     collisionType = nearby.COLLISION_TYPE.World + nearby.COLLISION_TYPE.HeightMap
 }
 
-local MIN_DURATION = 0.35
+local MIN_DURATION = 0.58   -- pwmantle 0.4s at speed .7; shorter cuts the clip
 local CLIMB_SPEED_UNITS_PER_SEC = 200.0
 local LANDING_BUFFER = 35.0
 local LEDGE_PUSH_IN = 45.0   -- distance past the ledge edge to finish

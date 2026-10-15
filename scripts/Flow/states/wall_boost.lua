@@ -13,7 +13,8 @@ local WallBoostState = BaseState.new("WallBoost")
 
 local APEX_HEIGHT = 160.0     -- peak height above the launch point
 local MAX_DURATION = 1.4      -- backend cap
-local MIN_STATE_TIME = 0.25   -- hands off to Airborne after this; exit cancels the boost
+local MIN_STATE_TIME = 0.52   -- hands off to Airborne after this; exit cancels the
+                              -- animation, and pwboostbk* is 0.5s
 
 local ACROBATICS_BONUS = 40
 

@@ -28,10 +28,22 @@ blending_rules:
     easing: "sineOut"
     duration: 0.13   # clip is 0.4s
   - from: "*"
+    to: "pwmantle1: *"
+    easing: "sineOut"
+    duration: 0.18   # clip is 0.4s at speed .7
+  - from: "*"
+    to: "pwmantle2: *"
+    easing: "sineOut"
+    duration: 0.18   # clip is 0.4s at speed .7
+  - from: "*"
+    to: "pwmantle3: *"
+    easing: "sineOut"
+    duration: 0.18   # clip is 0.4s at speed .7
+  - from: "*"
     to: "pwwalljump1: *"
     easing: "sineOut"
-    duration: 0.08   # clip is 0.23s
+    duration: 0.21   # clip is 0.667s
   - from: "*"
     to: "pwwalljump2: *"
     easing: "sineOut"
-    duration: 0.08   # clip is 0.23s
+    duration: 0.21   # clip is 0.667s

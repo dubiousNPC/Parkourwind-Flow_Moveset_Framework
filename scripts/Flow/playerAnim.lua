@@ -41,7 +41,9 @@ local GROUPS = {
     },
 
     Shimmy = {
-        variants = { left = "pwshimmyl1", right = "pwshimmyr1" },
+        -- Third-person sets key these pwshimmyl1/r1, the .1st sets pwshimmy1l/1r.
+        variants = { left = { "pwshimmyl1", "pwshimmy1l" },
+                     right = { "pwshimmyr1", "pwshimmy1r" } },
         speed = 1,
         priority = PRIORITY_FLOW_MAJOR,
         blendMask = animation.BLEND_MASK.All,
@@ -67,8 +69,8 @@ local GROUPS = {
     },
 
     WallJump  = {
-        -- 0.23s clip stretched over the hop; see states/wall_jump.lua.
-        group = { "pwwalljump1", "pwwalljump2" }, speed = 0.45,
+        -- Clip is 0.667s; the hop is BRACE+HOP = 0.65s. See states/wall_jump.lua.
+        group = { "pwwalljump1", "pwwalljump2" }, speed = 1.0,
         priority = PRIORITY_FLOW_MAJOR,
         blendMask = animation.BLEND_MASK.All,
         startKey = "start",
@@ -95,6 +97,7 @@ function Anim.registerAnimRefresh()
     end
 
     I.AnimRefresh.subscribe("FLOW", function()
+        Anim.forgetGroupAvailability()
         if reissue then reissue() end
     end, { verify = true })
 end
@@ -105,6 +108,36 @@ end
 
 local lastVariant = {}
 
+-- Which groups this skeleton actually defines. Cleared on a model rebuild,
+-- because first and third person load different animation sources: every .1st
+-- set keys shimmy pwshimmy1l/1r and no set but the beast one has pwwalljump2,
+-- so an unfiltered random pick is a silent no-op half the time.
+local groupAvailable = {}
+local absentWarned = {}
+
+function Anim.forgetGroupAvailability()
+    groupAvailable = {}
+end
+
+local function groupExists(group)
+    if not animation.hasGroup then return true end
+    local known = groupAvailable[group]
+    if known == nil then
+        known = animation.hasGroup(self, group)
+        groupAvailable[group] = known
+    end
+    return known
+end
+
+local function pickAvailable(list)
+    local pool = {}
+    for i = 1, #list do
+        if groupExists(list[i]) then pool[#pool + 1] = list[i] end
+    end
+    if #pool == 0 then return list[1] end
+    return pool[math.random(#pool)]
+end
+
 -- Resolves a GROUPS entry to an actual group name, honouring `variants`.
 local function resolveGroup(entry)
     if not entry then return nil end
@@ -114,14 +147,14 @@ local function resolveGroup(entry)
         if not group then
             for k, g in pairs(entry.variants) do key, group = k, g; break end
         end
+        if type(group) == "table" then group = pickAvailable(group) end
         if key then lastVariant[entry] = key end
         return group, key
     end
 
     if type(entry.group) == "table" then
-        local n = #entry.group
-        if n == 0 then return nil end
-        return entry.group[math.random(n)]
+        if #entry.group == 0 then return nil end
+        return pickAvailable(entry.group)
     end
     return entry.group
 end
@@ -137,22 +170,21 @@ function Anim.verifyGroups()
         return
     end
 
-    local probes = {}
+    -- One slot per thing the state can play; alts are interchangeable clips.
+    local slots = {}
     for stateName, entry in pairs(GROUPS) do
         if type(entry) == "table" then
             if entry.variants then
                 for dir, g in pairs(entry.variants) do
-                    probes[#probes + 1] = { stateName .. "/" .. dir, g,
+                    slots[#slots + 1] = { stateName .. "/" .. dir,
+                        type(g) == "table" and g or { g },
                         (entry.variantStartKey and entry.variantStartKey[dir]) or entry.startKey,
                         (entry.variantStopKey and entry.variantStopKey[dir]) or entry.stopKey }
                 end
             elseif type(entry.group) == "table" then
-                for i = 1, #entry.group do
-                    probes[#probes + 1] = { stateName .. "[" .. i .. "]", entry.group[i],
-                        entry.startKey, entry.stopKey }
-                end
+                slots[#slots + 1] = { stateName, entry.group, entry.startKey, entry.stopKey }
             elseif entry.group then
-                probes[#probes + 1] = { stateName, entry.group, entry.startKey, entry.stopKey }
+                slots[#slots + 1] = { stateName, { entry.group }, entry.startKey, entry.stopKey }
             end
         else
             print(string.format("[FLOW][anim] MALFORMED GROUPS entry '%s' (%s, expected table)",
@@ -160,27 +192,42 @@ function Anim.verifyGroups()
         end
     end
 
-    -- A group whose start key is missing is unplayable and silent.
-    for i = 1, #probes do
-        local label, group, sk, tk = probes[i][1], probes[i][2], probes[i][3], probes[i][4]
-        if not animation.hasGroup(self, group) then
-            print(string.format("[FLOW][anim] %-18s '%s' -> MISSING GROUP (T-pose or nothing)",
-                label, group))
-        elseif not animation.getTextKeyTime then
-            print(string.format("[FLOW][anim] %-18s '%s' -> group OK (keys unchecked)", label, group))
-        else
-            local bad = {}
-            for _, key in ipairs({ sk or "start", tk or "stop" }) do
-                if not animation.getTextKeyTime(self, group .. ": " .. key) then
-                    bad[#bad + 1] = key
+    -- A group whose start key is missing is unplayable and silent. A slot with
+    -- no playable clip at all is the fatal case; absent siblings only cost
+    -- variety, and the two POVs legitimately define different clip names.
+    local function keysMissing(group, sk, tk)
+        if not animation.getTextKeyTime then return nil end
+        local bad = {}
+        for _, key in ipairs({ sk or "start", tk or "stop" }) do
+            if not animation.getTextKeyTime(self, group .. ": " .. key) then
+                bad[#bad + 1] = key
+            end
+        end
+        return #bad > 0 and table.concat(bad, ", ") or nil
+    end
+
+    for i = 1, #slots do
+        local label, alts, sk, tk = slots[i][1], slots[i][2], slots[i][3], slots[i][4]
+        local playable, notes = {}, {}
+        for j = 1, #alts do
+            local group = alts[j]
+            if not animation.hasGroup(self, group) then
+                notes[#notes + 1] = group .. " absent"
+            else
+                local bad = keysMissing(group, sk, tk)
+                if bad then
+                    notes[#notes + 1] = group .. " missing key(s) " .. bad
+                else
+                    playable[#playable + 1] = group
                 end
             end
-            if #bad == 0 then
-                print(string.format("[FLOW][anim] %-18s '%s' -> OK", label, group))
-            else
-                print(string.format("[FLOW][anim] %-18s '%s' -> MISSING KEY(S): %s",
-                    label, group, table.concat(bad, ", ")))
-            end
+        end
+        local detail = #notes > 0 and ("  [" .. table.concat(notes, "; ") .. "]") or ""
+        if #playable == 0 then
+            print(string.format("[FLOW][anim] %-18s -> UNPLAYABLE%s", label, detail))
+        else
+            print(string.format("[FLOW][anim] %-18s -> OK %d/%d: %s%s", label,
+                #playable, #alts, table.concat(playable, ", "), detail))
         end
     end
 
@@ -199,6 +246,16 @@ local function playGroup(stateName, looping)
     local group, variant = resolveGroup(entry)
     pendingVariant = nil   -- consumed; never let a direction leak forward
     if not group then return end
+
+    -- playBlended on an undefined group is a silent no-op; say so once.
+    if not groupExists(group) then
+        if not absentWarned[group] then
+            absentWarned[group] = true
+            print(string.format("[FLOW][anim] '%s' is not defined on this skeleton "
+                .. "- %s will play nothing", group, stateName))
+        end
+        return
+    end
 
     if currentGroup == group then return end -- already playing, avoid restart stutter
     stopCurrent()

@@ -22,7 +22,7 @@ local DISTANCE_SCALING = 500.0
 local PROFILE_STEPS = 5             -- rays along the trajectory
 local PEAK_SAFETY_CLEARANCE = 55.0  -- feet clearance over the obstacle peak
 local AIR_DROP_HEIGHT = 45.0        -- release height above the target
-local MIN_APEX_RISE = 110.0         -- minimum apex above the start
+local MIN_APEX_RISE = 80.0         -- minimum apex above the start
 
 local PROFILE_SCAN_CEILING = 600.0  -- how far above the player to start each probe
 local PROFILE_SCAN_FLOOR = 50.0     -- how far below the player to end it
