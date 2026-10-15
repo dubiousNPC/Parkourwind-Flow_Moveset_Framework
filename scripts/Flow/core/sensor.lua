@@ -4,8 +4,8 @@ local nearby = require('openmw.nearby')
 local self = require('openmw.self')
 local util = require('openmw.util')
 local I = require('openmw.interfaces')
-local Settings = require('settings')
-local Body = require('core/body')
+local Settings = require('scripts/Flow/settings')
+local Body = require('scripts/Flow/core/body')
 
 -- Height bands: vault 25-50%, mantle 51-80%, walljump 80-110%, hang 110-130%.
 local VAULT_MIN_FRAC  = 0.25

@@ -1,6 +1,6 @@
 ---@omw-context player
 -- Mantle. Climbs onto a waist-to-head surface.
-local BaseState = require('states/base_state')
+local BaseState = require('scripts/Flow/states/base_state')
 local types = require('openmw.types')
 local mwSelf = require('openmw.self')
 local util = require('openmw.util')
@@ -8,9 +8,9 @@ local I = require('openmw.interfaces')
 local core = require('openmw.core')
 local camera = require('openmw.camera')
 local nearby = require('openmw.nearby')
-local Settings = require('settings')
-local Sensor = require('core/sensor')
-local EngineSync = require('core/engine_sync')
+local Settings = require('scripts/Flow/settings')
+local Sensor = require('scripts/Flow/core/sensor')
+local EngineSync = require('scripts/Flow/core/engine_sync')
 
 local MantleState = BaseState.new("Mantle")
 
@@ -79,7 +79,7 @@ function MantleState:enter(syncData)
         return
     end
 
-    local DebugHUD = require('core/debug_hud')
+    local DebugHUD = require('scripts/Flow/core/debug_hud')
     DebugHUD.update("Mantle", Sensor.getDebugString(), "MANTLE TRIGGERED")
 
     I.Controls.overrideMovementControls(true)

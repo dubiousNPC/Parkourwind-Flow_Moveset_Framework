@@ -3,11 +3,11 @@
 local core = require('openmw.core')
 local mwSelf = require('openmw.self')
 local util = require('openmw.util')
-local Owned = require('core/owned')
+local Owned = require('scripts/Flow/core/owned')
 local I = require('openmw.interfaces')
-local BaseState = require('states/base_state')
-local Anim = require('playerAnim')
-local EngineSync = require('core/engine_sync')
+local BaseState = require('scripts/Flow/states/base_state')
+local Anim = require('scripts/Flow/playerAnim')
+local EngineSync = require('scripts/Flow/core/engine_sync')
 
 local WallBoostState = BaseState.new("WallBoost")
 

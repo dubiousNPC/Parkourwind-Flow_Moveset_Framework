@@ -2,9 +2,9 @@
 local core = require('openmw.core')
 local mwSelf = require('openmw.self')
 local types = require('openmw.types')
-local Owned = require('core/owned')
-local BaseState = require('states/base_state')
-local Body = require('core/body')
+local Owned = require('scripts/Flow/core/owned')
+local BaseState = require('scripts/Flow/states/base_state')
+local Body = require('scripts/Flow/core/body')
 
 local WallJumpState = BaseState.new("WallJump")
 

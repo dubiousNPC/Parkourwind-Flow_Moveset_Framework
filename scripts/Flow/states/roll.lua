@@ -1,6 +1,6 @@
 ---@omw-context player
 -- Landing roll. Committed action; see README.
-local BaseState = require('states/base_state')
+local BaseState = require('scripts/Flow/states/base_state')
 local types = require('openmw.types')
 local mwSelf = require('openmw.self')
 local I = require('openmw.interfaces')

@@ -4,7 +4,7 @@
 local ui = require('openmw.ui')
 local util = require('openmw.util')
 
-local Settings = require('settings')
+local Settings = require('scripts/Flow/settings')
 
 local DebugHUD = {
     element = nil,

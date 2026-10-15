@@ -1,17 +1,17 @@
 ---@omw-context player
 -- LedgeHang. Holds an overhead ledge; routes to Shimmy and Mantle.
-local BaseState = require('states/base_state')
+local BaseState = require('scripts/Flow/states/base_state')
 local core = require('openmw.core')
 local mwSelf = require('openmw.self')
 local util = require('openmw.util')
 local I = require('openmw.interfaces')
 local nearby = require('openmw.nearby')
-local Sensor = require('core/sensor')
-local Settings = require('settings')
-local SensorExt = require('core/optional/sensor_ext')
-local ShimmyState = require('states/shimmy')
-local MantleState = require('states/mantle')
-local Owned = require('core/owned')
+local Sensor = require('scripts/Flow/core/sensor')
+local Settings = require('scripts/Flow/settings')
+local SensorExt = require('scripts/Flow/core/optional/sensor_ext')
+local ShimmyState = require('scripts/Flow/states/shimmy')
+local MantleState = require('scripts/Flow/states/mantle')
+local Owned = require('scripts/Flow/core/owned')
 
 local LedgeHangState = BaseState.new("LedgeHang")
 
@@ -48,7 +48,7 @@ end
 function LedgeHangState:enter(syncData)
     if Settings.debugMode() then print("[FLOW_STATE] >>> ENTERING LEDGE HANG") end
 
-    local DebugHUD = require('core/debug_hud')
+    local DebugHUD = require('scripts/Flow/core/debug_hud')
     DebugHUD.update("LedgeHang", SensorExt.data.debugReason, "GRABBED")
 
     timeInState = 0

@@ -3,8 +3,8 @@
 local nearby = require('openmw.nearby')
 local self = require('openmw.self')
 local util = require('openmw.util')
-local Settings = require('settings')
-local Body = require('core/body')
+local Settings = require('scripts/Flow/settings')
+local Body = require('scripts/Flow/core/body')
 
 -- Overhead ledges. HANDS_FRAC is where the hands reach, 110% of actor height.
 -- The probe spans well above and below it: this runs ONLY while airborne, from

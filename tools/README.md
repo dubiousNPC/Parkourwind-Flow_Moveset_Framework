@@ -1,24 +1,29 @@
 # tools/
 
-Three mechanical checks. None of them needs OpenMW, a Lua interpreter or a
+Six mechanical checks. None of them needs OpenMW, a Lua interpreter or a
 network connection — they are Python 3 and the mod's own source.
 
 ```sh
 python3 tools/check_syntax.py .
+python3 tools/check_requires.py .
 python3 tools/check_context.py . /path/to/Cod3x
 python3 tools/check_handlers.py .
+python3 tools/check_anims.py .
 python3 tools/check_regressions.py .
 ```
 
-All three exit 0 when clean and 1 when they find something, so they chain:
+All of them exit 0 when clean and 1 when they find something, so they chain:
 
 ```sh
 python3 tools/check_syntax.py . && \
+python3 tools/check_requires.py . && \
 python3 tools/check_context.py . ../Cod3x && \
+python3 tools/check_handlers.py . && \
+python3 tools/check_anims.py . && \
 python3 tools/check_regressions.py .
 ```
 
-## Why these three
+## Why these
 
 Each one guards a failure class that has cost a real testing session in this
 project, and that a playtest is bad at catching.
@@ -28,6 +33,25 @@ reports it once at startup where it is easy to miss. Every such failure this mod
 has shipped was a balance failure: an `end` lost in a merge, a long comment that
 swallowed the code after it, a paren left open. It is a structural check, not a
 parser: it will not find a missing `then`.
+
+**check_requires.py** — OpenMW resolves `require` against the VFS **root**,
+never relative to the requiring script. v0.78b moved the Lua under
+`scripts/Flow/` and left the paths alone: 27 files with no syntax error at all
+and 13 unresolved module paths. The first one raises while `main.lua` is still
+loading, so no handler is ever registered and the mod is indistinguishable in
+game from not being installed. A syntax check cannot see this, and neither can
+reading the files one at a time.
+
+**check_anims.py** — `animation.playBlended` on a group the skeleton does not
+define is a silent no-op: no error, no clip, the actor keeps its pose. Skeletons
+do not fall back on each other, so a clip missing from one `.kf` set works for
+you and not for half your players. It found `pwwalljump2` present in one set of
+six while `playerAnim` randomised between it and `pwwalljump1`, and shimmy keyed
+`pwshimmy1l/1r` in the `.1st` sets against `pwshimmyl1/r1` in the rest. Each
+`variants` direction is its own slot, because up, down and idle are different
+clips and a present `pwladderdwn` must not excuse a missing `pwladderup`. Text
+keys are read length-prefixed; a regex sweep runs past one string's length
+prefix into the next and invents keys that do not exist.
 
 **check_context.py** — OpenMW modules are restricted to certain script contexts,
 and some violations are *silent*. `require('openmw.nearby')` from the global

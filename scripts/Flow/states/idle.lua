@@ -1,11 +1,11 @@
 ---@omw-context player
-local BaseState = require('states/base_state')
+local BaseState = require('scripts/Flow/states/base_state')
 local types = require('openmw.types')
 local mwSelf = require('openmw.self')
-local Sensor = require('core/sensor')
-local VaultState = require('states/vault')
-local MantleState = require('states/mantle')
-local LadderState = require('states/ladder')
+local Sensor = require('scripts/Flow/core/sensor')
+local VaultState = require('scripts/Flow/states/vault')
+local MantleState = require('scripts/Flow/states/mantle')
+local LadderState = require('scripts/Flow/states/ladder')
 
 local IdleState = BaseState.new("Idle")
 

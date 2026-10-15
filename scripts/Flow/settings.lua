@@ -7,15 +7,14 @@ local storage = require("openmw.storage")
 local MOD_ID = "FLOW_AMF"
 local SETTINGS_KEY = "Settings" .. MOD_ID
 
-local pageOk = pcall(I.Settings.registerPage, {
+I.Settings.registerPage({
     key = MOD_ID,
     l10n = MOD_ID,
     name = "FLOW Movement",
     description = "Advanced Movement Framework Configuration"
 })
-if not pageOk then print("[FLOW] settings page failed to register") end
 
-local groupOk = pcall(I.Settings.registerGroup, {
+I.Settings.registerGroup({
     key = SETTINGS_KEY,
     page = MOD_ID,
     l10n = MOD_ID,
@@ -42,11 +41,10 @@ local groupOk = pcall(I.Settings.registerGroup, {
         },
     }
 })
-if not groupOk then print("[FLOW] settings group failed to register") end
 
 local STATES_KEY = SETTINGS_KEY .. "States"
 
-local statesOk = pcall(I.Settings.registerGroup, {
+I.Settings.registerGroup({
     key = STATES_KEY,
     page = MOD_ID,
     l10n = MOD_ID,
@@ -103,7 +101,6 @@ local statesOk = pcall(I.Settings.registerGroup, {
         },
     }
 })
-if not statesOk then print("[FLOW] settings group 'states' failed to register") end
 
 local section = storage.playerSection(SETTINGS_KEY)
 local statesSection = storage.playerSection(STATES_KEY)

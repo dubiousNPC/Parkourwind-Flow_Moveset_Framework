@@ -1,6 +1,6 @@
 ---@omw-context player
 -- WallRun. Optional, not loaded by default.
-local BaseState = require('states/base_state')
+local BaseState = require('scripts/Flow/states/base_state')
 local core = require('openmw.core')
 local mwSelf = require('openmw.self')
 local types = require('openmw.types')
@@ -8,8 +8,8 @@ local camera = require('openmw.camera')
 local util = require('openmw.util')
 local I = require('openmw.interfaces')
 local anim = require('openmw.animation') 
-local SensorExt = require('core/optional/sensor_ext')
-local Settings = require('settings')
+local SensorExt = require('scripts/Flow/core/optional/sensor_ext')
+local Settings = require('scripts/Flow/settings')
 local nearby = require('openmw.nearby')
 
 local WallRunState = BaseState.new("WallRun")
@@ -119,7 +119,7 @@ function WallRunState:enter(syncData)
     debugTimer = 0
     self.abort = false
 
-    local DebugHUD = require('core/debug_hud')
+    local DebugHUD = require('scripts/Flow/core/debug_hud')
     DebugHUD.update("WallRun", activeSide, "STARTED")
 end
 

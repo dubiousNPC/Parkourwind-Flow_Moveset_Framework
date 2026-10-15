@@ -1,8 +1,8 @@
 ---@omw-context player
 -- FSM. Single choke point for transitions and animation.
 local ui = require('openmw.ui')
-local Anim = require('playerAnim')
-local Settings = require('settings')
+local Anim = require('scripts/Flow/playerAnim')
+local Settings = require('scripts/Flow/settings')
 
 local StateManager = {
     states = {},

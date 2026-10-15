@@ -3,6 +3,36 @@ A modular framework to animate and improve Morrowind's traversal gameplay
 
 ## Changes
 
+## Layout
+
+Every FLOW-owned Lua file lives under `scripts/Flow/`. Only the paths the engine
+dictates stay at the VFS root:
+
+| at the root | why |
+|---|---|
+| `FLOW_AMF.omwscripts` | the content file |
+| `animations/<skeleton>/` | OpenMW resolves animation sources by skeleton folder |
+| `l10n/FLOW_AMF/` | the localisation root is fixed |
+| `shaders/` | post-process shaders are looked up by root path |
+| `scripts/AnimRefresh/`, `scripts/SharedRay/` | shared third-party paths, so OpenMW merges every mod's copy into one script |
+
+The namespace is not cosmetic. At the old root layout FLOW shipped `main.lua`,
+`settings.lua`, `playerAnim.lua`, `core/` and `states/` at the VFS root, and any
+other mod shipping a root `settings.lua` would occupy the same VFS path — the
+same collision the AnimRefresh filename version guard exists for.
+
+**`require` resolves against the VFS root, not relative to the requiring
+script.** So moving the tree means rewriting every path, and `core/sensor` is
+now `scripts/Flow/core/sensor`. Dots and slashes are interchangeable.
+`tools/check_requires.py` resolves all of them against the shipped file list;
+v0.78b moved the tree without that pass and left 13 paths dangling, which takes
+`main.lua` offline before it registers a single handler.
+
+`playerAnim.lua` and `settings.lua` are **modules**, not scripts, and are not
+listed in the manifest. Registering a module there loads a second instance that
+no `require` ever sees, and `settings.lua` registers its page at file scope, so
+the second instance re-registers it.
+
 ## Action priority
 
 The lowest available action always wins. Each rung is only reached when the one

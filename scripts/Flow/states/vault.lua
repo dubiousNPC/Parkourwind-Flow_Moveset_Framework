@@ -1,13 +1,13 @@
 ---@omw-context player
 -- Vault. Hurdles a knee-to-waist obstacle.
-local BaseState = require('states/base_state')
+local BaseState = require('scripts/Flow/states/base_state')
 local core = require('openmw.core')
 local mwSelf = require('openmw.self')
 local I = require('openmw.interfaces')
 local util = require('openmw.util')
 local nearby = require('openmw.nearby')
-local Sensor = require('core/sensor')
-local EngineSync = require('core/engine_sync')
+local Sensor = require('scripts/Flow/core/sensor')
+local EngineSync = require('scripts/Flow/core/engine_sync')
 
 local VaultState = BaseState.new("Vault")
 
@@ -61,7 +61,7 @@ function VaultState:enter(syncData)
         return
     end
 
-    local DebugHUD = require('core/debug_hud')
+    local DebugHUD = require('scripts/Flow/core/debug_hud')
     DebugHUD.update("Vault", Sensor.getDebugString(), "VAULT TRIGGERED")
 
     local startPos = mwSelf.position

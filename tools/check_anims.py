@@ -79,7 +79,10 @@ def slots(root):
     clips, not alternatives, so a missing pwladderup must not be excused by a
     present pwladderdwn. Only a list under `group` is interchangeable.
     """
-    src = open(os.path.join(root, 'playerAnim.lua'), encoding='utf-8').read()
+    found_at = glob.glob(os.path.join(root, '**', 'playerAnim.lua'), recursive=True)
+    if not found_at:
+        raise SystemExit('no playerAnim.lua under %s' % root)
+    src = open(found_at[0], encoding='utf-8').read()
     body, _ = braced(src, src.index('{', src.index('local GROUPS')))
     found = []
     for m in re.finditer(r'(\w+)\s*=\s*\{', body):
