@@ -6,9 +6,12 @@ local I = require('openmw.interfaces')
 
 local Anim = {}
 
--- Above the engine's Jump (4) and Movement (5); a tie hides both.
-local PRIORITY_FLOW       = animation.PRIORITY.Weapon
-local PRIORITY_FLOW_MAJOR = animation.PRIORITY.Block
+-- Above the engine's Jump (4) and Movement (5). Per-bone-group tables, not bare
+-- enums: a uniform priority is DELETED by any engine animation sharing it, not
+-- just outranked. See core/anim_priority.lua.
+local AnimPriority = require('scripts/Flow/core/anim_priority')
+local PRIORITY_FLOW       = AnimPriority.FLOW
+local PRIORITY_FLOW_MAJOR = AnimPriority.FLOW_MAJOR
 
 local GROUPS = {
     Vault     = { group = { "pwvault1", "pwvault2", "pwvault3" }, speed = .8,

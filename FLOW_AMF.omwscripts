@@ -1,4 +1,3 @@
 PLAYER: scripts/SharedRay/SharedRay_v2.lua
-PLAYER: scripts/AnimRefresh/AnimRefresh_v5.lua
 PLAYER: scripts/Flow/main.lua
 GLOBAL: scripts/Flow/global/flow_amf_backend.lua

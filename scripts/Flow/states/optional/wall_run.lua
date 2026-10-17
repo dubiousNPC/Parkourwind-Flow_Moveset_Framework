@@ -8,6 +8,7 @@ local camera = require('openmw.camera')
 local util = require('openmw.util')
 local I = require('openmw.interfaces')
 local anim = require('openmw.animation') 
+local AnimPriority = require('scripts/Flow/core/anim_priority')
 local SensorExt = require('scripts/Flow/core/optional/sensor_ext')
 local Settings = require('scripts/Flow/settings')
 local nearby = require('openmw.nearby')
@@ -108,7 +109,7 @@ function WallRunState:enter(syncData)
     I.Controls.overrideMovementControls(true) 
     
     anim.playBlended(mwSelf, 'runforward', {
-        priority = anim.PRIORITY.Weapon,
+        priority = AnimPriority.FLOW,
         loops = -1,
         speed = 1.35,
         blendMask = anim.BLEND_MASK.LowerBody, 
