@@ -2,6 +2,8 @@
 A modular framework to animate and improve Morrowind's traversal gameplay
 
 ## Changes
+**REQUIRES AnimRefresh_V6**
+
 
 ## Layout
 
