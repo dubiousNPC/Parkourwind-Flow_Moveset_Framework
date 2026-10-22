@@ -6,6 +6,7 @@ local util = require('openmw.util')
 local nearby = require('openmw.nearby')
 local I = require('openmw.interfaces')
 local BaseState = require('scripts/Flow/states/base_state')
+local SkillCheck = require('scripts/Flow/core/skill_check')
 local Anim = require('scripts/Flow/playerAnim')
 local Settings = require('scripts/Flow/settings')
 local Owned = require('scripts/Flow/core/owned')
@@ -88,6 +89,10 @@ local function setClipFor(dir)
 end
 
 function LadderState:enter(syncData)
+    self.abort = SkillCheck.evaluate("Ladder") ~= "ok"
+    if self.abort then return end
+    SkillCheck.spend("Ladder")
+
     wallNormal = pendingNormal
     lastDir = 0
     pendingNormal = nil
@@ -122,6 +127,7 @@ function LadderState:exit()
 end
 
 function LadderState:update(dt, syncData, inputData)
+    if self.abort then return "Idle" end
     -- Drop off deliberately.
     if inputData.crouch then
         return "Airborne"

@@ -60,7 +60,7 @@ function StateManager.setState(nextStateName, syncData)
     end
 
     StateManager.activeState = nextState
-    StateManager.activeState:enter(syncData)
+    StateManager.activeState:enter(syncData, prevStateName)
 
     if StateManager.activeState.abort then
         if Settings.debugMode() then

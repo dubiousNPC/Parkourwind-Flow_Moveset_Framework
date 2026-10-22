@@ -10,6 +10,7 @@ local Anim = {}
 -- enums: a uniform priority is DELETED by any engine animation sharing it, not
 -- just outranked. See core/anim_priority.lua.
 local AnimPriority = require('scripts/Flow/core/anim_priority')
+local Settings = require('scripts/Flow/settings')
 local PRIORITY_FLOW       = AnimPriority.FLOW
 local PRIORITY_FLOW_MAJOR = AnimPriority.FLOW_MAJOR
 
@@ -71,9 +72,36 @@ local GROUPS = {
         stopKey = "stop",
     },
 
+    -- brace is pwwalljump1 (0.333s); the launch clip is picked by direction.
     WallJump  = {
-        -- Clip is 0.667s; the hop is BRACE+HOP = 0.65s. See states/wall_jump.lua.
-        group = { "pwwalljump1", "pwwalljump2" }, speed = 1.0,
+        variants = { brace = "pwwalljump1", up = "pwboostup",
+                     left = "pwboostbkl", right = "pwboostbkr" },
+        speed = 1,
+        priority = PRIORITY_FLOW_MAJOR,
+        blendMask = animation.BLEND_MASK.All,
+        startKey = "start",
+        stopKey = "stop",
+    },
+
+    Dive      = {
+        group = "pwfalling", speed = 1,   -- looping fall pose
+        priority = PRIORITY_FLOW_MAJOR,
+        blendMask = animation.BLEND_MASK.All,
+        startKey = "start",
+        stopKey = "stop",
+    },
+
+    -- skydive1 is one clip in two halves: a windup from `start`, then the idle
+    -- between `loop start` and `loop stop`. The state plays them as two
+    -- requests rather than trusting loops=-1 to find the loop keys.
+    Skydive   = {
+        variants = { entry = "skydive1", loop = "skydive1",
+                     left = "skydivel", right = "skydiver",
+                     forward = "skydivefwd" },
+        variantStartKey = { loop = "loop start" },
+        variantStopKey = { entry = "loop stop", loop = "loop stop" },
+        variantSpeed = { entry = function() return 10.0 / Settings.skydiveWindup() end },
+        speed = 1,
         priority = PRIORITY_FLOW_MAJOR,
         blendMask = animation.BLEND_MASK.All,
         startKey = "start",
@@ -81,7 +109,8 @@ local GROUPS = {
     },
 }
 
-local LOOPING_STATES = { LedgeHang = true, Ladder = true }
+local LOOPING_STATES = { LedgeHang = true, Ladder = true, Dive = true,
+                         Skydive = true }
 local ONE_SHOT_STATES = { Vault = true, Mantle = true, Roll = true,
                           Shimmy = true, WallBoost = true, WallJump = true }
 
@@ -107,6 +136,14 @@ end
 
 function Anim.setVariant(name)
     pendingVariant = name
+end
+
+-- Multiplies the next play's speed. Vault and Mantle use 0.5 for a failed
+-- skill check, which has to stretch the clip as well as the move.
+local pendingSpeedScale = nil
+
+function Anim.setSpeedScale(scale)
+    pendingSpeedScale = scale
 end
 
 local lastVariant = {}
@@ -275,12 +312,20 @@ local function playGroup(stateName, looping)
         if vt ~= nil then stopKey = vt or nil end
     end
 
+    local speed = entry.speed or 1
+    if variant and entry.variantSpeed and entry.variantSpeed[variant] then
+        speed = entry.variantSpeed[variant]
+    end
+    if type(speed) == "function" then speed = speed() end
+    if pendingSpeedScale then speed = speed * pendingSpeedScale end
+    pendingSpeedScale = nil
+
     animation.playBlended(self, group, {
         startKey = startKey,
         stopKey = stopKey,
         priority = entry.priority,
         blendMask = entry.blendMask,
-        speed = entry.speed or 1,
+        speed = speed,
         loops = looping and -1 or 0,
         forceLoop = looping and true or nil,
         autoDisable = autoDisable,
@@ -299,9 +344,13 @@ reissue = function()
     playGroup(lastRequest.state, lastRequest.looping)
 end
 
--- Re-resolves the current state's group, picking up a new variant.
-function Anim.replay()
-    if lastRequest then playGroup(lastRequest.state, lastRequest.looping) end
+-- Re-resolves the current state's group, picking up a new variant. `force` is
+-- for a variant that resolves to the group already playing, which playGroup
+-- otherwise skips - Skydive's windup and loop are both skydive1.
+function Anim.replay(force)
+    if not lastRequest then return end
+    if force then currentGroup = nil end
+    playGroup(lastRequest.state, lastRequest.looping)
 end
 
 function Anim.onStateChange(newState, oldState)

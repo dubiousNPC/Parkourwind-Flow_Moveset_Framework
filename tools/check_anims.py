@@ -30,7 +30,10 @@ import struct
 import sys
 
 KEYLINE = re.compile(r'^\s*([A-Za-z][\w ]*?)\s*:\s*(.+?)\s*$')
-QUOTED = re.compile(r'"(pw[a-z0-9]+)"')
+# Any quoted identifier inside a `group` or `variants` value is a group name:
+# those are the only quoted strings in those captures. Matching only `pw*`
+# silently dropped every skydive slot.
+QUOTED = re.compile(r'"([A-Za-z][A-Za-z0-9_]*)"')
 
 
 def kf_keys(path):
@@ -93,12 +96,12 @@ def slots(root):
         vm = re.search(r'variants\s*=\s*\{', entry)
         if vm:
             inner, _ = braced(entry, vm.end() - 1)
-            for d in re.finditer(r'(\w+)\s*=\s*(\{[^}]*\}|"pw[a-z0-9]+")', inner):
+            for d in re.finditer(r'(\w+)\s*=\s*(\{[^}]*\}|"[A-Za-z][A-Za-z0-9_]*")', inner):
                 names = QUOTED.findall(d.group(2))
                 if names:
                     found.append(('%s/%s' % (state, d.group(1)), names))
         else:
-            gm = re.search(r'group\s*=\s*(\{[^}]*\}|"pw[a-z0-9]+")', entry)
+            gm = re.search(r'group\s*=\s*(\{[^}]*\}|"[A-Za-z][A-Za-z0-9_]*")', entry)
             names = QUOTED.findall(gm.group(1)) if gm else []
             if names:
                 found.append((state, names))

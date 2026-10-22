@@ -70,6 +70,31 @@ local function onHopStart(data)
     }
 end
 
+-- Holds the actor still. This is the wall-jump brace: a platform's worth of
+-- support without a platform, so nothing is spawned and nothing is left behind.
+local function onBraceStart(data)
+    ActiveMoves[data.actor.id] = {
+        type = "Brace",
+        actor = data.actor,
+        pos = data.actor.position,
+        duration = data.duration,
+        elapsed = 0,
+    }
+end
+
+-- Raw-velocity integrator. Boost always launches upward; this one takes the
+-- vector as given, so it can drive a dive downward.
+local function onGlideStart(data)
+    ActiveMoves[data.actor.id] = {
+        type = "Glide",
+        actor = data.actor,
+        velocity = data.velocity,
+        gravity = data.gravity or GRAVITY,
+        maxDuration = data.maxDuration or 1.0,
+        elapsed = 0,
+    }
+end
+
 local function onMoveCancel(data)
     if data.actor then
         ActiveMoves[data.actor.id] = nil
@@ -144,6 +169,17 @@ local function onUpdate(dt)
                 nextPos = util.vector3(p.x, p.y, move.startZ + move.rise * t * (2 - t))
                 if t >= 1.0 then ActiveMoves[id] = nil end
 
+            elseif move.type == "Brace" then
+                move.elapsed = move.elapsed + dt
+                nextPos = move.pos
+                if move.elapsed >= move.duration then ActiveMoves[id] = nil end
+
+            elseif move.type == "Glide" then
+                move.elapsed = move.elapsed + dt
+                move.velocity = move.velocity - util.vector3(0, 0, move.gravity * dt)
+                nextPos = actor.position + move.velocity * dt
+                if move.elapsed >= move.maxDuration then ActiveMoves[id] = nil end
+
             elseif move.type == "Boost" then
                 move.elapsed = move.elapsed + dt
                 move.velocity = move.velocity - util.vector3(0, 0, GRAVITY * dt)
@@ -193,5 +229,8 @@ return {
         FLOW_Boost_Cancel = onMoveCancel,
         FLOW_Hop_Start = onHopStart,
         FLOW_Hop_Cancel = onMoveCancel,
+        FLOW_Brace_Start = onBraceStart,
+        FLOW_Glide_Start = onGlideStart,
+        FLOW_Move_Cancel = onMoveCancel,
     }
 }

@@ -47,6 +47,12 @@ reach of everything else.
 | 2 | **Mantle** | 51-80%, destination not blocked |
 | 3 | **LedgeHang** | hands can reach the lip (85-130% of height), lip above the catch floor, **and the camera looking at or above level** |
 | 4 | **WallJump** | all three refused, wall contact, forward held, off cooldown |
+| 5 | **Skydive** | nothing else offered, 1.5s airborne, and 1400 units of air below |
+
+Skydive sits below the ladder on purpose and is tried once per airborne period:
+above it, a long fall past a reachable ledge would become a skydive instead of a
+hang. It also hands back to Airborne as soon as its clearance ray finds ground,
+so Roll and LedgeHang still get their chance on the way down.
 
 Resolved in `states/airborne.lua`'s `update`, in that order. From the ground,
 `states/idle.lua` resolves Vault then Mantle; the other two are airborne-only.
@@ -107,25 +113,42 @@ is a silent no-op. `resolveGroup` filters a list of interchangeable clips by
 on an AnimRefresh callback, since a POV switch changes the answer.
 
 Measured clip lengths, used to set state durations, animation speeds and blend
-times. `xbase_animkna` (beast, third person) is the odd one out:
+times. As of v0.79 every set agrees, which it did not before:
 
-| clip | length | `xbase_animkna` |
-|---|---|---|
-| `pwwalljump1` | 0.667s | 0.23s |
-| `pwwalljump2` | absent | 0.23s |
-| `pwvault1/2/3`, `pwmantle1/2/3` | 0.40s | same |
-| `pwboostbkl/r`, `pwropeidle` | 0.50s | same |
-| `pwladderidle` | 0.83s | same |
-| `pwropeup/dwn` | 1.00s | same |
-| `pwroll1`, `pwwallhangidle` | 1.07s | same |
-| shimmy left / right | 1.07s | 2.00s / 1.27s |
-| `pwrun1` | 1.50s | 1.33s |
-| `pwladderdwn` | 2.50s | same |
-| `pwladderup` | 2.87s | **no `stop` key** |
+| clip | length |
+|---|---|
+| `pwwalljump1` (brace) | 0.333s |
+| `pwvault1/2/3`, `pwmantle1/2/3` | 0.40s |
+| `pwboostup`, `pwboostbkl/r`, `pwropeidle`, `skydivel/r` | 0.50s |
+| `pwladderidle` | 0.833s |
+| `pwropeup/dwn`, `skydivefwd` | 1.00s |
+| `pwroll1`, `pwwallhangidle` | 1.067s |
+| `pwropeup2` | 1.133s |
+| `pwfalling` | 1.50s (loops 0.033-1.467) |
+| `pwrun1` | 1.50s |
+| `pwladderdwn` | 2.50s |
+| `pwladderup` | 2.867s |
+| `skydive1` | windup 10.0s, then a 2.833s loop |
 
 Shimmy is keyed `pwshimmyl1`/`pwshimmyr1` in the three third-person sets and
 `pwshimmy1l`/`pwshimmy1r` in the three `.1st` sets. Both spellings are listed
 as interchangeable so either POV resolves.
+
+`pwwalljump2` was removed from every set and is no longer referenced.
+`pwropeup2` exists in the climbing files and is not yet used by any state.
+
+**One group, one file per folder.** Every `.kf` in `animations/<skeleton>/` is
+added as an animation source, so a group defined in two files in the same folder
+resolves by load order rather than by intent. Two live cases:
+
+- `xclimbing1.kf` and `xParkourwind1.kf` both declare `pwladderidle`,
+  `pwladderup`, `pwladderdwn` and the three rope groups, at different times
+  (`pwladderup` is 2.867s in one and 2.833s in the other). The climbing file is
+  the newer of the two - it is the only one with `pwropeup2` - so the ladder and
+  rope groups want removing from `xParkourwind1.kf`, not the reverse.
+- `xbase_animkna.1st/` shipped `xParkourwind1kna.kf` beside
+  `xParkourwind1.1st.kf`, declaring the same groups with the pre-v0.79 timings
+  and no `pwboostup` at all. That file is deleted here.
 
 A state that ends before its clip cuts the animation, because leaving the state
 cancels the group. Visible time is `min(state window, clip / speed)`:
@@ -136,7 +159,12 @@ cancels the group. Visible time is `min(state window, clip / speed)`:
 | Mantle | `max(0.58, rise/200) + 0.06` ≥ 0.64s | 0.40 / 0.7 = 0.57s |
 | Roll | 1.07s | 1.067 / 1 = 1.07s |
 | WallBoost | 0.52s | 0.50 / 1 = 0.50s |
-| WallJump | `0.10 + 0.55 + 0.10` = 0.75s | 0.667 / 1 = 0.67s |
+| WallJump brace | 0.333s | 0.333 / 1 = 0.333s |
+| WallJump boost | 0.50s | 0.50 / 1 = 0.50s |
+| Dive | 1.2s | looping |
+
+A failed Vault or Mantle check doubles the window *and* halves the speed, so
+both sides of that row scale together and the clip still fits.
 
 Shimmy is the exception: it ends on travelled distance, not a clock, and hands
 back to LedgeHang after each 30-unit step, so only as much of the 1.07s clip
@@ -153,6 +181,107 @@ are short, so the wildcard base is 0.25s with shorter bottom-most overrides per
 group. Bottom-most rule wins. The overrides are sized against clip length
 *after* `speed`, which is why mantle's 0.4s clip gets 0.18s and vault's gets
 0.13s.
+
+## Skill checks and fatigue
+
+`core/skill_check.lua` is the only place a move's difficulty or cost is written
+down. One formula:
+
+```
+chance = 30 + 0.55*Acrobatics + 0.35*(Agility - 50)
+         scaled by Morrowind's own fatigue term, 1.25 - 0.5*(1 - fatigue/max)
+```
+
+measured against a per-move difficulty that the **Skill Check Threshold**
+setting scales. The check is **deterministic, not a dice roll** - the same wall
+has to answer the same way twice, or the ladder stops being predictable and
+every refusal reads as a bug.
+
+| move | difficulty | fatigue | failing the check |
+|---|---|---|---|
+| Ladder | 0 | 2 | - |
+| Vault | 10 | 4 | **half speed** |
+| Shimmy | 20 | 2 | refused |
+| Roll | 20 | 5 | - |
+| Mantle | 25 | 8 | **half speed** |
+| LedgeHang | 30 | 6 | refused |
+| Skydive | 35 | 0 | refused |
+| Dive | 40 | 10 | refused |
+| WallBoost | 45 | 12 | refused |
+| WallJump | 55 | 14 | refused |
+
+**Vault and Mantle never refuse.** A failed check doubles the move's duration
+and halves its animation speed, which is why `Anim.setSpeedScale` exists:
+stretching the move without stretching the clip cuts the clip.
+
+Not enough fatigue counts as a failed check, so the two forgiving moves stay
+available when exhausted, slowly. **Fatigue Cost** at 0 stops the spending
+without disabling the checks; **Skill Checks** off makes every move available.
+
+Two charging rules that are not obvious:
+
+- **LedgeHang does not charge when Shimmy hands back to it.** Shimmy returns to
+  LedgeHang after every 30-unit step, so charging on entry billed one hang
+  several times a second.
+- **A move that would refuse is not requested.** LedgeHang tests Shimmy's check
+  before asking for it, and Shimmy tests WallBoost's, because a refused state
+  aborts straight back and the bounce restarts the pose every frame.
+
+## WallJump, in two beats
+
+Jump into a wall, press jump again within 0.45s while touching it, and the
+player **braces**: `pwwalljump1`, 0.333s, position pinned. The brace is the
+input window. Press jump once more inside it and the brace becomes a boost; let
+it run out and you fall, having earned nothing.
+
+| second press | clip | launch |
+|---|---|---|
+| no lateral intent | `pwboostup` | vertical `Hop`, Acrobatics-scaled |
+| steering away from the wall | `pwboostbkl` / `pwboostbkr` | ballistic `Boost`, 120 apex, 420 lateral |
+
+Lateral intent is the strafe keys first, then **camera swing** since entry - in
+third person the body turns with the camera, so a swing is how a mouse-only
+player asks for it. It only fires *away* from the wall: `wallNormal` points out
+of the wall, so the sign of `right:dot(wallNormal)` says which side it is on,
+and a press toward the wall gives the vertical boost instead. Side detection is
+WallRun's own `SensorExt.updateWallRun`, called once here and nowhere else.
+
+The brace is a backend `Brace` move that holds the actor at a fixed position for
+its duration. That is the "temporary platform" of the first attempt without
+spawning anything, and the spawned platform mesh is exactly what had to be
+removed last time. Levitate is held across brace and launch, because the hop
+drives Z absolutely while engine gravity keeps accumulating.
+
+There is no `pwboostl` / `pwboostr` in any shipped `.kf`. The lateral clips are
+`pwboostbkl` / `pwboostbkr`, which WallBoost already uses.
+
+## Dive and Skydive
+
+**Dive.** A jump pressed in the last 0.30s of `pwroll1` carries the roll's
+momentum into the air with `pwfalling` looping over it. It takes no movement
+override, so air control stays vanilla and the pose is cosmetic; the arc is one
+`Boost` and then the engine owns it. Requires Landing Roll.
+
+**Skydive.** `skydive1` is one clip in two halves - a windup from `start`, then
+an idle between `loop start` and `loop stop`. FLOW plays them as two separate
+requests rather than trusting `loops = -1` to find the loop keys, which also
+makes the transition observable to the state.
+
+The windup is **10.0s of clip** from `start` to `loop start`. No fall in
+Morrowind lasts that long: ten seconds under the engine's gravity is on the
+order of 28,000 units of drop, several cells of height and more than any terrain
+offers. So the windup is compressed by `speed` to the **Skydive Windup** setting
+(default 2.0s, so speed 5.0). That is a tuning knob, not a fix - the honest
+alternative is a shorter windup in the `.kf`.
+
+Steering: `skydivefwd` while forward is held, which also drives a `Glide` -
+forward 700, down 450, at reduced gravity, refreshed every 0.25s so the heading
+follows the camera. `skydivel` / `skydiver` on the strafe keys are pose-only.
+Straight-down skydiving runs on engine gravity and costs no teleports at all,
+which is the point: the per-frame teleport is paid only while actively diving.
+
+Acrobatics is fortified by 250 and Jump by 150 for the duration, through
+`Owned`, so a save taken mid-skydive is undone on load.
 
 ## Implementation notes
 
@@ -206,6 +335,10 @@ else lives in `RESEARCH.md`.
   `PEAK_SAFETY_CLEARANCE` (the curve peaks that far above the obstacle).
   `MIN_APEX_RISE` clamps the control point and never binds in the 25-50% band:
   the solved control point is already `1.5 * obstacle + 2 * clearance`.
+- **AnimRefresh has to be in the manifest, not just in the zip.** v0.79 shipped
+  `scripts/AnimRefresh/AnimRefresh_v6.lua` with no `PLAYER:` line for it, so
+  `I.AnimRefresh` was nil and no pose survived a POV switch, a rest or a load.
+  `tools/regressions.txt` carries the path, which is why the bump is caught.
 - **`core/h3lp_compat.lua` prints its live timer backend once at load.** h3lp is
   a soft dependency tested with `vfs.fileExists`, so which implementation is
   running is otherwise unanswerable from a log.

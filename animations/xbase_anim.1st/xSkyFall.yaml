@@ -1,0 +1,22 @@
+blending_rules:
+  # The skydive entry is long; the loop and the steering clips are not.
+  - from: "*"
+    to: "*"
+    easing: "sineOut"
+    duration: 0.25
+  - from: "*"
+    to: "skydive1: *"
+    easing: "sineOut"
+    duration: 0.30   # windup, 10s of clip
+  - from: "*"
+    to: "skydivel: *"
+    easing: "sineOut"
+    duration: 0.17   # clip is 0.5s
+  - from: "*"
+    to: "skydiver: *"
+    easing: "sineOut"
+    duration: 0.17   # clip is 0.5s
+  - from: "*"
+    to: "skydivefwd: *"
+    easing: "sineOut"
+    duration: 0.25   # clip is 1.0s

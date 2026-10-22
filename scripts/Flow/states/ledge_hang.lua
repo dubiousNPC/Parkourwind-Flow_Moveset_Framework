@@ -1,6 +1,7 @@
 ---@omw-context player
 -- LedgeHang. Holds an overhead ledge; routes to Shimmy and Mantle.
 local BaseState = require('scripts/Flow/states/base_state')
+local SkillCheck = require('scripts/Flow/core/skill_check')
 local core = require('openmw.core')
 local mwSelf = require('openmw.self')
 local util = require('openmw.util')
@@ -45,7 +46,16 @@ local function snapTo(pos, rot)
     })
 end
 
-function LedgeHangState:enter(syncData)
+function LedgeHangState:enter(syncData, prevStateName)
+    -- Shimmy hands back here after every step; that is one hang, not many.
+    if prevStateName ~= "Shimmy" then
+        self.abort = SkillCheck.evaluate("LedgeHang") ~= "ok"
+        if self.abort then return end
+        SkillCheck.spend("LedgeHang")
+    else
+        self.abort = false
+    end
+
     if Settings.debugMode() then print("[FLOW_STATE] >>> ENTERING LEDGE HANG") end
 
     local DebugHUD = require('scripts/Flow/core/debug_hud')
@@ -94,6 +104,7 @@ function LedgeHangState:exit()
 end
 
 function LedgeHangState:update(dt, syncData, inputData)
+    if self.abort then return "Airborne" end
     timeInState = timeInState + dt
 
     local lateralInput = inputData.moveVector.x
@@ -102,7 +113,7 @@ function LedgeHangState:update(dt, syncData, inputData)
         local newLip = ShimmyState.probeStep(mwSelf.position, cachedTargetPos, wallNormal, dir)
         if newLip then
             ShimmyState.setStep(dir, wallNormal, newLip)
-            return "Shimmy"
+            if SkillCheck.evaluate("Shimmy") == "ok" then return "Shimmy" end
         end
     end
 

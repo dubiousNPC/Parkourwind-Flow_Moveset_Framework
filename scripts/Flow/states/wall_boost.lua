@@ -6,6 +6,7 @@ local util = require('openmw.util')
 local Owned = require('scripts/Flow/core/owned')
 local I = require('openmw.interfaces')
 local BaseState = require('scripts/Flow/states/base_state')
+local SkillCheck = require('scripts/Flow/core/skill_check')
 local Anim = require('scripts/Flow/playerAnim')
 local EngineSync = require('scripts/Flow/core/engine_sync')
 
@@ -38,6 +39,10 @@ local function applyAcrobatics(enable)
 end
 
 function WallBoostState:enter(syncData)
+    self.abort = SkillCheck.evaluate("WallBoost") ~= "ok"
+    if self.abort then return end
+    SkillCheck.spend("WallBoost")
+
     timeInState = 0
 
     Anim.setVariant(pendingDir < 0 and "left" or "right")
@@ -74,6 +79,7 @@ function WallBoostState:exit()
 end
 
 function WallBoostState:update(dt, syncData, inputData)
+    if self.abort then return "Airborne" end
     timeInState = timeInState + dt
 
     if timeInState < MIN_STATE_TIME then

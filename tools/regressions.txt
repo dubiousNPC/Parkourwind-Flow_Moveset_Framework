@@ -91,7 +91,7 @@ needs: if Anim.verifyGroups then
 
 file: FLOW_AMF.omwscripts
 why: AnimRefresh must be registered at the SHARED path so OpenMW merges FLOW's copy with every other mod's into one script. The filename carries the version, so a bump changes this line.
-needs: scripts/AnimRefresh/AnimRefresh_v5.lua
+needs: scripts/AnimRefresh/AnimRefresh_v6.lua
 
 file: FLOW_AMF.omwscripts
 why: SharedRay must be registered at the shared path for the same reason. Third-party file - never edit its contents.
@@ -235,8 +235,9 @@ why: the availability cache must be dropped on a model rebuild. First and third 
 needs: forgetGroupAvailability
 
 file: scripts/Flow/playerAnim.lua
-why: WallJump speed tracks the clip. The clip was re-authored from 0.23s to 0.667s and speed 0.45 then stretched it to 1.48s against a 0.75s state, cutting it at half.
-needs: speed = 1.0
+why: WallJump's clips play at their authored speed. The clip has been re-cut twice - 0.23s, then 0.667s, now a 0.333s brace plus a 0.5s boost - and each time a leftover speed multiplier stretched it past the state window and cut it. Any speed here has to be re-derived from tools/check_anims.py, not carried over.
+needs: brace = "pwwalljump1"
+needs: up = "pwboostup"
 
 file: scripts/Flow/states/mantle.lua
 why: MIN_DURATION must not be shorter than pwmantle at its play speed - 0.4s at speed .7 is 0.571s. At 0.35 a low mantle cut the clip at 72%.
@@ -261,3 +262,56 @@ file: scripts/Flow/settings.lua
 why: registerPage and registerGroup are not wrapped in pcall. The pcall turned the only real failure - a duplicate registration from a double load - into one print, while statesSection:get() went on reading a section that was never registered, so every setting silently fell back to its default and the player's choices did nothing.
 needs: not-present pcall
 needs: I.Settings.registerPage({
+
+file: scripts/Flow/core/skill_check.lua
+why: Vault and Mantle must stay accessible. A failed check halves their speed instead of refusing, so DEGRADES is what keeps the two most-used moves from ever being taken away - every other move refuses.
+needs: DEGRADES = { Vault = true, Mantle = true }
+needs: evaluate
+
+file: scripts/Flow/core/skill_check.lua
+why: the check is deterministic, not a dice roll. The same wall must not pass on one press and fail on the next, or the priority ladder stops being predictable and every refusal reads as a bug.
+needs: not-present math.random
+
+file: scripts/Flow/states/ledge_hang.lua
+why: LedgeHang must NOT charge fatigue when Shimmy hands back to it. Shimmy returns here after every 30-unit step, so charging on entry billed one hang several times a second and drained fatigue in a few steps.
+needs: prevStateName ~= "Shimmy"
+
+file: scripts/Flow/states/ledge_hang.lua
+why: a Shimmy that will refuse must not be requested. It aborts straight back to LedgeHang, and the bounce restarted the hang pose every frame for as long as the key was held.
+needs: SkillCheck.evaluate("Shimmy") == "ok"
+
+file: scripts/Flow/states/wall_jump.lua
+why: the brace IS the input window. pwwalljump1 is 0.333s and the second jump press has to land inside it; a brace longer than its clip leaves the player hanging in a finished pose, and a shorter one makes the window unhittable.
+needs: BRACE_DURATION = 0.333
+needs: jumpPressed
+
+file: scripts/Flow/states/wall_jump.lua
+why: the lateral launch only fires away from the wall. wallNormal points out of the wall, so the sign of right:dot(normal) says which side it is on; without that test a sideways boost drove the player into the wall they were pushing off.
+needs: rightVector():dot(wallNormal)
+
+file: scripts/Flow/global/flow_amf_backend.lua
+why: Brace holds position instead of spawning a platform. The first WallJump attempt teleport-lerped toward a spawned platform mesh and had to be removed; pinning the actor for the brace duration is the same support with nothing left in the world.
+needs: Brace
+
+file: scripts/Flow/global/flow_amf_backend.lua
+why: Glide takes a raw velocity. Boost derives v0z from apexHeight and is always upward, so it cannot drive Skydive's forward dive downward.
+needs: Glide
+
+file: scripts/Flow/states/skydive.lua
+why: Skydive hands back to Airborne when the ground comes up, so Roll and LedgeHang still get their chance instead of the skydive running into the floor.
+needs: CLEARANCE_RECHECK
+needs: hasClearance
+
+file: scripts/Flow/states/airborne.lua
+why: Skydive is tested BELOW the priority ladder and only once per airborne period. Above it, a long fall past a reachable ledge would have become a skydive instead of a hang.
+needs: skydiveTried
+needs: SKYDIVE_ARM_TIME
+
+file: scripts/Flow/main.lua
+why: WallJump and Dive hold movement overrides. A state holding one without being listed in OVERRIDE_STATES has it released by the per-tick safety net on the next frame, silently.
+needs: WallJump = true
+needs: Dive = true
+
+file: scripts/Flow/playerAnim.lua
+why: Skydive's windup and loop are both skydive1, and playGroup skips a replay of the group already playing. Anim.replay(true) is what forces the key change through.
+needs: function Anim.replay(force)

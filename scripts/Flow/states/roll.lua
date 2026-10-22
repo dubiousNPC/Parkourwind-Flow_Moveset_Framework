@@ -4,6 +4,8 @@ local BaseState = require('scripts/Flow/states/base_state')
 local types = require('openmw.types')
 local mwSelf = require('openmw.self')
 local I = require('openmw.interfaces')
+local Settings = require('scripts/Flow/settings')
+local SkillCheck = require('scripts/Flow/core/skill_check')
 
 local RollState = BaseState.new("Roll")
 
@@ -14,6 +16,9 @@ local REFUND_MAX = 0.75
 local REFUND_SKILL_CAP = 100.0
 
 local DAMAGE_WATCH_WINDOW = 0.25
+
+-- Jump inside this much of the end carries into a Dive.
+local DIVE_WINDOW = 0.30
 
 local pendingHealthBefore = nil
 
@@ -32,6 +37,7 @@ local INTERRUPT_GRACE = 0.1
 local timeInState = 0
 local healthBefore = nil
 local refundApplied = false
+local diveArmed = false
 
 local function refundFraction()
     local acro = types.NPC.stats.skills.acrobatics(mwSelf).modified or 0
@@ -42,6 +48,8 @@ end
 function RollState:enter(syncData)
     timeInState = 0
     refundApplied = false
+    diveArmed = false
+    SkillCheck.spend("Roll")
 
     healthBefore = pendingHealthBefore
     pendingHealthBefore = nil
@@ -68,6 +76,11 @@ function RollState:update(dt, syncData, inputData)
 
     mwSelf.controls.run = true
 
+    if not diveArmed and inputData.jumpPressed
+       and timeInState >= ROLL_DURATION - DIVE_WINDOW then
+        diveArmed = true
+    end
+
     if not refundApplied and healthBefore and timeInState <= DAMAGE_WATCH_WINDOW then
         local hp = types.Actor.stats.dynamic.health(mwSelf)
         local lost = healthBefore - hp.current
@@ -83,6 +96,7 @@ function RollState:update(dt, syncData, inputData)
     end
 
     if timeInState >= ROLL_DURATION then
+        if diveArmed and Settings.stateEnabled("Dive") then return "Dive" end
         return "Idle"
     end
 

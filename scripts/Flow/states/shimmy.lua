@@ -6,6 +6,7 @@ local util = require('openmw.util')
 local nearby = require('openmw.nearby')
 local I = require('openmw.interfaces')
 local BaseState = require('scripts/Flow/states/base_state')
+local SkillCheck = require('scripts/Flow/core/skill_check')
 local Anim = require('scripts/Flow/playerAnim')
 local WallBoostState = require('scripts/Flow/states/wall_boost')
 local Settings = require('scripts/Flow/settings')
@@ -113,6 +114,10 @@ local function applySuspension(enable)
 end
 
 function ShimmyState:enter(syncData)
+    self.abort = SkillCheck.evaluate("Shimmy") ~= "ok"
+    if self.abort then return end
+    SkillCheck.spend("Shimmy")
+
     timeInState = 0
     dir = pendingDir
     lastStepDir = dir
@@ -145,9 +150,11 @@ function ShimmyState:exit()
 end
 
 function ShimmyState:update(dt, syncData, inputData)
+    if self.abort then return "LedgeHang" end
     timeInState = timeInState + dt
 
-    if inputData.jump and Settings.stateEnabled("WallBoost") then
+    if inputData.jump and Settings.stateEnabled("WallBoost")
+       and SkillCheck.evaluate("WallBoost") == "ok" then
         WallBoostState.setLaunch(wallNormal, dir)
         resultLip, resultNormal = nil, nil
         return "WallBoost"

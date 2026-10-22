@@ -20,6 +20,8 @@ local Settings = require('scripts/Flow/settings')
 local Body = require('scripts/Flow/core/body')
 local Owned = require('scripts/Flow/core/owned')
 local EngineSync = require('scripts/Flow/core/engine_sync')
+local WallJumpState = require('scripts/Flow/states/wall_jump')
+local SkydiveState = require('scripts/Flow/states/skydive')
 
 local AirborneState = BaseState.new("Airborne")
 
@@ -38,6 +40,10 @@ local WALL_CONTACT_MARGIN = 8.0
 
 local WALL_CONTACT_HEIGHT = 70.0
 
+-- Skydive arms on its own after a sustained fall, but only with real air
+-- below: the clearance ray is what stops an ordinary drop becoming one.
+local SKYDIVE_ARM_TIME = 1.5
+
 local armed = false
 local timeAirborne = 0
 local isActive = false
@@ -45,6 +51,8 @@ local jumpEdge = false
 local wallJumpReadyAt = 0
 local wallJumpLanding = nil
 local agilityApplied = false
+local skydiveTried = false
+local lastWallNormal = nil
 
 -- One wall jump per confirmed landing, counted by EngineSync.
 local function wallJumpSpent(syncData)
@@ -87,8 +95,10 @@ local function wallContact()
     local fwd = util.transform.rotateZ(yaw):apply(util.vector3(0, 1, 0))
 
     local res = nearby.castRay(origin, origin + fwd * reach, WALL_RAY_OPTS)
-    return res.hit and res.hitNormal ~= nil
-        and res.hitNormal.z < Sensor.WALKABLE_SLOPE_Z
+    if not (res.hit and res.hitNormal ~= nil) then return false end
+    if res.hitNormal.z >= Sensor.WALKABLE_SLOPE_Z then return false end
+    lastWallNormal = res.hitNormal
+    return true
 end
 
 input.registerTriggerHandler("Jump", async:callback(function()
@@ -145,6 +155,7 @@ function AirborneState:enter(syncData)
     timeAirborne = 0
     jumpEdge = false
     landedSignal = false
+    skydiveTried = false
 end
 
 function AirborneState:exit()
@@ -190,8 +201,18 @@ function AirborneState:update(dt, syncData, inputData)
            and wallContact() then
             wallJumpLanding = syncData.landings
             wallJumpReadyAt = core.getRealTime() + WALL_JUMP_COOLDOWN
+            WallJumpState.setWallNormal(lastWallNormal)
             return "WallJump"
         end
+    end
+
+    -- Below the ladder: a skydive must never pre-empt a reachable action.
+    if not skydiveTried and not armed
+       and timeAirborne >= SKYDIVE_ARM_TIME
+       and not syncData.isGrounded
+       and Settings.stateEnabled("Skydive") then
+        skydiveTried = true
+        if SkydiveState.hasClearance() then return "Skydive" end
     end
 
     local touchedDown = syncData.isGrounded or (landedSignal and armed)

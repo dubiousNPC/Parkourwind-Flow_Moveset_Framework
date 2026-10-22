@@ -99,11 +99,63 @@ I.Settings.registerGroup({
             description = "Climbing statics recognised as ladders. Turning this off also skips the forward probe that looks for them.",
             default = true, renderer = "checkbox"
         },
+        {
+            key = "stateDive",
+            name = "Dive",
+            description = "Pressing jump as a landing roll finishes carries the momentum into a dive. Requires Landing Roll.",
+            default = true, renderer = "checkbox"
+        },
+        {
+            key = "stateSkydive",
+            name = "Skydive",
+            description = "A long enough fall from a long enough height goes into a skydive, with Acrobatics heavily boosted and steering on the movement keys.",
+            default = true, renderer = "checkbox"
+        },
+    }
+})
+
+local CHALLENGE_KEY = SETTINGS_KEY .. "Challenge"
+
+I.Settings.registerGroup({
+    key = CHALLENGE_KEY,
+    page = MOD_ID,
+    l10n = MOD_ID,
+    name = "SettingsFLOW_AMF_Challenge",
+    permanentStorage = false,
+    settings = {
+        {
+            key = "skillChecks",
+            name = "Skill Checks",
+            description = "Gate moves on Acrobatics, Agility and remaining fatigue. Vault and Mantle never refuse - a failed check makes them half speed instead. Off means every move is always available.",
+            default = true, renderer = "checkbox"
+        },
+        {
+            key = "skillDifficulty",
+            name = "Skill Check Threshold",
+            description = "Scales every move's difficulty. 0.5 is half as demanding, 2.0 twice. At 0 every check passes while fatigue costs still apply.",
+            default = 1.0, renderer = "number",
+            argument = { min = 0.0, max = 3.0 }
+        },
+        {
+            key = "staminaScale",
+            name = "Fatigue Cost",
+            description = "Scales the fatigue every move spends. 0 disables fatigue costs entirely; a move you cannot afford is refused, or made half speed for Vault and Mantle.",
+            default = 1.0, renderer = "number",
+            argument = { min = 0.0, max = 3.0 }
+        },
+        {
+            key = "skydiveWindup",
+            name = "Skydive Windup (seconds)",
+            description = "How long the skydive entry animation takes before the loop begins. The clip is 10 seconds of real time from its start key to its loop start, which no fall in Morrowind lasts, so it is played faster to fit. Lower is snappier.",
+            default = 2.0, renderer = "number",
+            argument = { min = 0.5, max = 10.0 }
+        },
     }
 })
 
 local section = storage.playerSection(SETTINGS_KEY)
 local statesSection = storage.playerSection(STATES_KEY)
+local challengeSection = storage.playerSection(CHALLENGE_KEY)
 
 local cache = {}
 
@@ -127,6 +179,22 @@ statesSection:subscribe(async:callback(function()
     stateCache = {}
 end))
 
+local challengeCache = {}
+
+challengeSection:subscribe(async:callback(function()
+    challengeCache = {}
+end))
+
+local function challenge(key, default)
+    local v = challengeCache[key]
+    if v == nil then
+        v = challengeSection:get(key)
+        if v == nil then v = default end
+        challengeCache[key] = v
+    end
+    return v
+end
+
 local STATE_KEYS = {
     Vault     = "stateVault",
     Mantle    = "stateMantle",
@@ -136,6 +204,8 @@ local STATE_KEYS = {
     WallJump  = "stateWallJump",
     Roll      = "stateRoll",
     Ladder    = "stateLadder",
+    Dive      = "stateDive",
+    Skydive   = "stateSkydive",
 }
 
 local function stateEnabled(name)
@@ -155,6 +225,11 @@ return {
     modEnabled = function() return get("modEnabled", true) end,
     disableInInteriors = function() return get("disableInInteriors", false) end,
     debugMode = function() return get("debugMode", false) end,
+
+    skillChecks = function() return challenge("skillChecks", true) end,
+    skillDifficulty = function() return challenge("skillDifficulty", 1.0) end,
+    staminaScale = function() return challenge("staminaScale", 1.0) end,
+    skydiveWindup = function() return challenge("skydiveWindup", 2.0) end,
 
     stateEnabled = stateEnabled,
 }
