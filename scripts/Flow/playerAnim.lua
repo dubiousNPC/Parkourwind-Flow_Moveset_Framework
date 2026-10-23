@@ -83,25 +83,45 @@ local GROUPS = {
         stopKey = "stop",
     },
 
+    -- dbsdive in three passes: the leaping lead-in, the tumble loop, and the
+    -- resolve out of it. Times in states/../core/air_pose.lua.
     Dive      = {
-        group = "pwfalling", speed = 1,   -- looping fall pose
+        variants = { lead = "dbsdive", loop = "dbsdive", land = "dbsdive" },
+        variantStartKey = { loop = "loop start", land = "loop stop" },
+        variantStopKey = { lead = "loop start", loop = "loop stop" },
+        speed = 1,
         priority = PRIORITY_FLOW_MAJOR,
         blendMask = animation.BLEND_MASK.All,
         startKey = "start",
         stopKey = "stop",
     },
 
-    -- skydive1 is one clip in two halves: a windup from `start`, then the idle
-    -- between `loop start` and `loop stop`. The state plays them as two
-    -- requests rather than trusting loops=-1 to find the loop keys.
+    -- skydive1's windup runs to the author's own `skydive: release` key, at
+    -- whatever speed makes that take the configured number of seconds.
     Skydive   = {
         variants = { entry = "skydive1", loop = "skydive1",
                      left = "skydivel", right = "skydiver",
                      forward = "skydivefwd" },
         variantStartKey = { loop = "loop start" },
         variantStopKey = { entry = "loop stop", loop = "loop stop" },
-        variantSpeed = { entry = function() return 10.0 / Settings.skydiveWindup() end },
+        variantSpeed = { entry = function() return Anim.skydiveWindupSpeed() end },
         speed = 1,
+        priority = PRIORITY_FLOW_MAJOR,
+        blendMask = animation.BLEND_MASK.All,
+        startKey = "start",
+        stopKey = "stop",
+    },
+
+    Falling   = {
+        group = "pwfalling", speed = 1,
+        priority = PRIORITY_FLOW,
+        blendMask = animation.BLEND_MASK.All,
+        startKey = "start",
+        stopKey = "stop",
+    },
+
+    Stumble   = {
+        group = "dbsfall", speed = 1,
         priority = PRIORITY_FLOW_MAJOR,
         blendMask = animation.BLEND_MASK.All,
         startKey = "start",
@@ -109,10 +129,10 @@ local GROUPS = {
     },
 }
 
-local LOOPING_STATES = { LedgeHang = true, Ladder = true, Dive = true,
-                         Skydive = true }
+local LOOPING_STATES = { LedgeHang = true, Ladder = true }
 local ONE_SHOT_STATES = { Vault = true, Mantle = true, Roll = true,
-                          Shimmy = true, WallBoost = true, WallJump = true }
+                          Shimmy = true, WallBoost = true, WallJump = true,
+                          Stumble = true }
 
 local currentGroup = nil
 
@@ -134,17 +154,25 @@ function Anim.registerAnimRefresh()
     end, { verify = true })
 end
 
+-- Clip time from skydive1's start to the author's `skydive: release` key,
+-- divided by how many seconds the player wants that to take.
+local SKYDIVE_RELEASE_SPAN = 5.467   -- fallback if the key is missing
+
+function Anim.skydiveWindupSpeed()
+    local windup = math.max(0.5, Settings.skydiveWindup())
+    local span = SKYDIVE_RELEASE_SPAN
+    if animation.getTextKeyTime then
+        local release = animation.getTextKeyTime(self, "skydive: release")
+        local from = animation.getTextKeyTime(self, "skydive1: start")
+        if release and from and release > from then span = release - from end
+    end
+    return span / windup
+end
+
 function Anim.setVariant(name)
     pendingVariant = name
 end
 
--- Multiplies the next play's speed. Vault and Mantle use 0.5 for a failed
--- skill check, which has to stretch the clip as well as the move.
-local pendingSpeedScale = nil
-
-function Anim.setSpeedScale(scale)
-    pendingSpeedScale = scale
-end
 
 local lastVariant = {}
 
@@ -317,8 +345,6 @@ local function playGroup(stateName, looping)
         speed = entry.variantSpeed[variant]
     end
     if type(speed) == "function" then speed = speed() end
-    if pendingSpeedScale then speed = speed * pendingSpeedScale end
-    pendingSpeedScale = nil
 
     animation.playBlended(self, group, {
         startKey = startKey,
@@ -351,6 +377,20 @@ function Anim.replay(force)
     if not lastRequest then return end
     if force then currentGroup = nil end
     playGroup(lastRequest.state, lastRequest.looping)
+end
+
+-- Cosmetic pose. The requesting state stays active and keeps its movement
+-- authority; this only drives the skeleton. AnimRefresh still reissues it.
+function Anim.setPose(name, variant, looping)
+    pendingVariant = variant
+    lastRequest = { state = name, looping = looping and true or false }
+    currentGroup = nil
+    playGroup(name, looping and true or false)
+end
+
+function Anim.clearPose()
+    lastRequest = nil
+    stopCurrent()
 end
 
 function Anim.onStateChange(newState, oldState)

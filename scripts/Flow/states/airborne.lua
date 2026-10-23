@@ -21,28 +21,29 @@ local Body = require('scripts/Flow/core/body')
 local Owned = require('scripts/Flow/core/owned')
 local EngineSync = require('scripts/Flow/core/engine_sync')
 local WallJumpState = require('scripts/Flow/states/wall_jump')
-local SkydiveState = require('scripts/Flow/states/skydive')
+local AirPose = require('scripts/Flow/core/air_pose')
+local SkillCheck = require('scripts/Flow/core/skill_check')
 
 local AirborneState = BaseState.new("Airborne")
 
 local AGILITY_BONUS = 70
 
-local LEDGE_AIM_DROP = 16   -- how far below level still counts as looking up
+local LEDGE_AIM_DROP = 34   -- how far below level still counts as looking up
 
 local FORWARD_DEADZONE = 0.1
 
-local ROLL_MIN_AIR_TIME = 1.0
+local ROLL_MIN_AIR_TIME = 0.75
 
-local WALL_JUMP_WINDOW = 0.45
-local WALL_JUMP_COOLDOWN = 2.0
+local WALL_JUMP_WINDOW = 0.70
+local WALL_JUMP_COOLDOWN = 1.2
 
-local WALL_CONTACT_MARGIN = 8.0
+local WALL_CONTACT_MARGIN = 18.0
 
 local WALL_CONTACT_HEIGHT = 70.0
 
--- Skydive arms on its own after a sustained fall, but only with real air
--- below: the clearance ray is what stops an ordinary drop becoming one.
-local SKYDIVE_ARM_TIME = 1.5
+-- Skydive arms on its own after a sustained fall, with real air below.
+local SKYDIVE_ARM_TIME = 1.2
+local SKYDIVE_CLEARANCE = 1200.0
 
 local armed = false
 local timeAirborne = 0
@@ -83,6 +84,17 @@ local function lookingAtLedge(targetPos)
     -- care how far away the hit is. Comparing the hit's absolute Z to the lip
     -- rejected any shot that landed on the wall below it, which is most of them.
     return (ray.hitPos.z - camera.getPosition().z) > -LEDGE_AIM_DROP
+end
+
+local DOWN_RAY_OPTS = {
+    ignore = mwSelf,
+    collisionType = nearby.COLLISION_TYPE.World + nearby.COLLISION_TYPE.HeightMap
+}
+
+local function skydiveClearance()
+    local pos = mwSelf.position
+    return not nearby.castRay(pos,
+        pos - util.vector3(0, 0, SKYDIVE_CLEARANCE), DOWN_RAY_OPTS).hit
 end
 
 -- One ray, straight ahead, cast only on the keypress.
@@ -139,11 +151,11 @@ function AirborneState.getRollDebug()
         or (timeAirborne <= WALL_JUMP_WINDOW and " WJ-ready" or "")
 
     if armed then
-        return string.format("ROLL: ARMED air=%.2f%s%s", timeAirborne,
-            landedSignal and " LANDKEY" or "", wj)
+        return string.format("ROLL: ARMED air=%.2f%s%s %s", timeAirborne,
+            landedSignal and " LANDKEY" or "", wj, AirPose.debugString())
     end
-    return string.format("ROLL: idle air=%.2f fwd=%.2f%s", timeAirborne,
-        InputManager.intents.moveVector.y, wj)
+    return string.format("ROLL: idle air=%.2f fwd=%.2f%s %s", timeAirborne,
+        InputManager.intents.moveVector.y, wj, AirPose.debugString())
 end
 
 local healthBeforeLanding = nil
@@ -156,11 +168,17 @@ function AirborneState:enter(syncData)
     jumpEdge = false
     landedSignal = false
     skydiveTried = false
+
+    if AirPose.takeDiveRequest() and Settings.stateEnabled("Dive") then
+        SkillCheck.attempt("Dive")
+        AirPose.startDive()
+    end
 end
 
 function AirborneState:exit()
     isActive = false
     applyAgility(false)
+    AirPose.clear()
 end
 
 function AirborneState:update(dt, syncData, inputData)
@@ -206,14 +224,21 @@ function AirborneState:update(dt, syncData, inputData)
         end
     end
 
-    -- Below the ladder: a skydive must never pre-empt a reachable action.
-    if not skydiveTried and not armed
+    -- Below the ladder, and a pose rather than a state, so everything above
+    -- stays reachable while it runs.
+    if not AirPose.active() and not skydiveTried and not armed
        and timeAirborne >= SKYDIVE_ARM_TIME
        and not syncData.isGrounded
        and Settings.stateEnabled("Skydive") then
         skydiveTried = true
-        if SkydiveState.hasClearance() then return "Skydive" end
+        if skydiveClearance() then AirPose.startSkydive() end
     end
+
+    if not AirPose.active() and SkillCheck.botched() then
+        AirPose.showFalling()
+    end
+
+    AirPose.update(dt, syncData, inputData)
 
     local touchedDown = syncData.isGrounded or (landedSignal and armed)
 
@@ -223,14 +248,22 @@ function AirborneState:update(dt, syncData, inputData)
     end
 
     landedSignal = false
+    applyAgility(false)
+    AirPose.clear()
+
+    -- A botched manoeuvre is paid for here, ahead of the roll it would have
+    -- earned: the stumble IS the failure, so it cannot be rolled out of.
+    if SkillCheck.botched() then
+        armed = false
+        return "Stumble"
+    end
+
     if armed then
-        applyAgility(false)
         armed = false
         RollState.setLandingData(healthBeforeLanding)
         return "Roll"
     end
 
-    applyAgility(false)
     return "Idle"
 end
 

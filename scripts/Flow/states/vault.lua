@@ -2,7 +2,6 @@
 -- Vault. Hurdles a knee-to-waist obstacle.
 local BaseState = require('scripts/Flow/states/base_state')
 local SkillCheck = require('scripts/Flow/core/skill_check')
-local Anim = require('scripts/Flow/playerAnim')
 local core = require('openmw.core')
 local mwSelf = require('openmw.self')
 local I = require('openmw.interfaces')
@@ -40,10 +39,6 @@ local DEST_FLOOR_TOLERANCE = 60.0 -- how far the found floor may sit below landP
 local APEX_DIST_REFERENCE = 120.0 -- distance at which no extra lift is added
 local APEX_DIST_GAIN = 0.12       -- extra lift per unit beyond that
 local APEX_DIST_BONUS_MAX = 30.0  -- hard ceiling on the extra lift
-
--- A failed skill check never refuses a Vault or a Mantle; it halves the
--- speed instead, so the move stays available and reads as effort.
-local SLOW_FACTOR = 2.0
 
 local BLOCK_DURATION = 0.35
 
@@ -151,11 +146,7 @@ function VaultState:enter(syncData)
     local dist = (rawLandPos - startPos):length()
     estimatedDuration = math.max(0.25, VAULT_BASE_DURATION + (dist / DISTANCE_SCALING))
 
-    if SkillCheck.evaluate("Vault") == "degraded" then
-        estimatedDuration = estimatedDuration * SLOW_FACTOR
-        Anim.setSpeedScale(1.0 / SLOW_FACTOR)
-    end
-    SkillCheck.spend("Vault")
+    SkillCheck.attempt("Vault")
 
     I.Controls.overrideMovementControls(true)
     I.Controls.overrideCombatControls(true)
@@ -188,6 +179,7 @@ function VaultState:update(dt, syncData, inputData)
     timeInState = timeInState + dt
 
     if timeInState >= estimatedDuration + COMPLETION_GRACE then
+        if SkillCheck.botched() then return "Stumble" end
         return "Idle"
     end
 

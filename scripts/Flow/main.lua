@@ -24,8 +24,7 @@ local LadderState = require('scripts/Flow/states/ladder')
 local ShimmyState = require('scripts/Flow/states/shimmy')
 local WallBoostState = require('scripts/Flow/states/wall_boost')
 local WallJumpState = require('scripts/Flow/states/wall_jump')
-local DiveState = require('scripts/Flow/states/dive')
-local SkydiveState = require('scripts/Flow/states/skydive')
+local StumbleState = require('scripts/Flow/states/stumble')
 
 local REGISTERED_STATES = {
     IdleState,
@@ -38,8 +37,7 @@ local REGISTERED_STATES = {
     ShimmyState,
     WallBoostState,
     WallJumpState,
-    DiveState,
-    SkydiveState
+    StumbleState
 }
 
 local DEBUG_HUD_INTERVAL = 0.1
@@ -52,7 +50,7 @@ local idleTick = H3.every(IDLE_THROTTLE_INTERVAL)
 local OVERRIDE_STATES = {
     Vault = true, Mantle = true, LedgeHang = true,
     Shimmy = true, WallBoost = true, Ladder = true,
-    Roll = true, WallJump = true, Dive = true,
+    Roll = true, WallJump = true, Stumble = true,
 }
 
 local overrideHeld = false

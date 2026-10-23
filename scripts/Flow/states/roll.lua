@@ -5,7 +5,7 @@ local types = require('openmw.types')
 local mwSelf = require('openmw.self')
 local I = require('openmw.interfaces')
 local Settings = require('scripts/Flow/settings')
-local SkillCheck = require('scripts/Flow/core/skill_check')
+local AirPose = require('scripts/Flow/core/air_pose')
 
 local RollState = BaseState.new("Roll")
 
@@ -49,7 +49,6 @@ function RollState:enter(syncData)
     timeInState = 0
     refundApplied = false
     diveArmed = false
-    SkillCheck.spend("Roll")
 
     healthBefore = pendingHealthBefore
     pendingHealthBefore = nil
@@ -70,15 +69,24 @@ function RollState:update(dt, syncData, inputData)
         return "Idle"
     end
 
-    mwSelf.controls.movement = FORWARD_DRIVE
-    mwSelf.controls.sideMovement = 0
-    mwSelf.controls.jump = false
-
-    mwSelf.controls.run = true
-
     if not diveArmed and inputData.jumpPressed
        and timeInState >= ROLL_DURATION - DIVE_WINDOW then
         diveArmed = true
+    end
+
+    mwSelf.controls.movement = FORWARD_DRIVE
+    mwSelf.controls.sideMovement = 0
+    mwSelf.controls.run = true
+
+    -- Jump is suppressed for the whole roll but the dive: there the press goes
+    -- straight to the engine, so the dive is a native jump with no teleport.
+    mwSelf.controls.jump = diveArmed
+
+    -- Hand over the moment the feet leave the ground, so the pose starts with
+    -- the jump rather than whenever the clip happens to run out.
+    if diveArmed and not syncData.isGrounded then
+        AirPose.requestDive()
+        return "Airborne"
     end
 
     if not refundApplied and healthBefore and timeInState <= DAMAGE_WATCH_WINDOW then
@@ -96,7 +104,10 @@ function RollState:update(dt, syncData, inputData)
     end
 
     if timeInState >= ROLL_DURATION then
-        if diveArmed and Settings.stateEnabled("Dive") then return "Dive" end
+        if diveArmed then
+            AirPose.requestDive()
+            return "Airborne"
+        end
         return "Idle"
     end
 

@@ -11,8 +11,8 @@ local Body = require('scripts/Flow/core/body')
 -- the player's CURRENT feet, so a window measured from the band alone travels
 -- upward with the jump and a 30-unit span passes a given lip in two frames.
 local HANDS_FRAC = 1.10
-local PROBE_ABOVE = 0.20   -- ceiling 130% of height, the design limit
-local PROBE_BELOW = 0.25   -- floor 85%, so a lip is caught while rising to it
+local PROBE_ABOVE = 0.28   -- ceiling 138% of height
+local PROBE_BELOW = 0.32   -- floor 78%, so a lip is caught while rising to it
 
 local LIP_PROBE_RISE = 4.0
 
@@ -22,10 +22,10 @@ local SensorExt = {
     SIDE_REACH = 100,
     WALL_RUN_MIN_SPEED = 150,
     WALL_MAX_Z_NORMAL = 0.6,
-    WALL_ALIGN_THRESHOLD = 0.3,
+    WALL_ALIGN_THRESHOLD = 0.2,
     WAIST_H = 70,
 
-    GRAB_REACH = 90,
+    GRAB_REACH = 115,
     LIP_CHECK_DEPTH = 10,
     LIP_PROBE_RISE = LIP_PROBE_RISE,
 

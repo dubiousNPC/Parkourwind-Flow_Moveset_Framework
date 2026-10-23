@@ -1,12 +1,12 @@
 ---@omw-context player
--- Skill check and fatigue cost for every move. One formula, one cost table.
+-- Skill check and fatigue cost. A failed check never blocks a move; it botches
+-- it, and the stumble lands on the player instead. See README.
 local types = require('openmw.types')
 local mwSelf = require('openmw.self')
 local Settings = require('scripts/Flow/settings')
 
 local SkillCheck = {}
 
--- Formula and per-move numbers: see README.
 local BASE = 30.0
 local SKILL_WEIGHT = 0.55
 local AGILITY_WEIGHT = 0.35
@@ -14,18 +14,17 @@ local AGILITY_WEIGHT = 0.35
 local FATIGUE_TERM_BASE = 1.25
 local FATIGUE_TERM_SPAN = 0.50
 
+-- Never checked and never charged: these are traversal, not feats.
+local EXEMPT = { LedgeHang = true, Roll = true, Ladder = true, Skydive = true }
+
 -- Difficulty is what `chance` must beat; the threshold setting scales it.
 local MOVES = {
-    Vault     = { difficulty = 10, fatigue = 4 },
-    Mantle    = { difficulty = 25, fatigue = 8 },
-    LedgeHang = { difficulty = 30, fatigue = 6 },
-    Shimmy    = { difficulty = 20, fatigue = 2 },
-    Ladder    = { difficulty = 0,  fatigue = 2 },
-    Roll      = { difficulty = 20, fatigue = 5 },
-    WallBoost = { difficulty = 45, fatigue = 12 },
-    WallJump  = { difficulty = 55, fatigue = 14 },
-    Dive      = { difficulty = 40, fatigue = 10 },
-    Skydive   = { difficulty = 35, fatigue = 0 },
+    Vault     = { difficulty = 8,  fatigue = 3 },
+    Mantle    = { difficulty = 18, fatigue = 6 },
+    Shimmy    = { difficulty = 15, fatigue = 2 },
+    WallBoost = { difficulty = 35, fatigue = 8 },
+    WallJump  = { difficulty = 45, fatigue = 10 },
+    Dive      = { difficulty = 30, fatigue = 6 },
 }
 
 local function fatigueRatio()
@@ -55,40 +54,52 @@ function SkillCheck.fatigueCost(moveName)
     return move.fatigue * Settings.staminaScale()
 end
 
--- Deterministic on purpose: no dice roll. See README.
-function SkillCheck.passes(moveName)
-    if not Settings.skillChecks() then return true end
-    return SkillCheck.chance() >= SkillCheck.difficulty(moveName)
-end
-
-function SkillCheck.affordable(moveName)
-    local cost = SkillCheck.fatigueCost(moveName)
-    if cost <= 0 then return true end
-    return types.Actor.stats.dynamic.fatigue(mwSelf).current >= cost
-end
-
+-- Exhaustion is already in the formula, through the fatigue term. There is no
+-- separate affordability gate: an empty bar lowers the chance, it does not take
+-- the move away.
 function SkillCheck.spend(moveName)
+    if EXEMPT[moveName] then return end
     local cost = SkillCheck.fatigueCost(moveName)
     if cost <= 0 then return end
     local f = types.Actor.stats.dynamic.fatigue(mwSelf)
     f.current = math.max(0, f.current - cost)
 end
 
--- Entry gate: "ok" / "degraded" / "refused". Vault and Mantle never refuse.
-local DEGRADES = { Vault = true, Mantle = true }
-
+-- "ok" or "botched". Never a refusal: the move always happens.
 function SkillCheck.evaluate(moveName)
-    if not SkillCheck.affordable(moveName) then
-        return DEGRADES[moveName] and "degraded" or "refused"
-    end
-    if SkillCheck.passes(moveName) then return "ok" end
-    return DEGRADES[moveName] and "degraded" or "refused"
+    if EXEMPT[moveName] then return "ok" end
+    if not Settings.skillChecks() then return "ok" end
+    if SkillCheck.chance() >= SkillCheck.difficulty(moveName) then return "ok" end
+    return "botched"
+end
+
+local botched = false
+
+-- Set by a state that failed its check; read by Airborne, which shows the
+-- falling pose and lands the player in a Stumble.
+function SkillCheck.botch()
+    botched = true
+end
+
+function SkillCheck.botched()
+    return botched
+end
+
+function SkillCheck.clearBotch()
+    botched = false
+end
+
+-- One call for a state's entry: charge, check, and flag the botch.
+function SkillCheck.attempt(moveName)
+    SkillCheck.spend(moveName)
+    if SkillCheck.evaluate(moveName) == "ok" then return true end
+    SkillCheck.botch()
+    return false
 end
 
 function SkillCheck.debugString(moveName)
-    return string.format("%s chance=%.0f need=%.0f fat=%.0f",
-        moveName, SkillCheck.chance(), SkillCheck.difficulty(moveName),
-        SkillCheck.fatigueCost(moveName))
+    return string.format("%s %.0f/%.0f%s", moveName, SkillCheck.chance(),
+        SkillCheck.difficulty(moveName), botched and " BOTCH" or "")
 end
 
 return SkillCheck

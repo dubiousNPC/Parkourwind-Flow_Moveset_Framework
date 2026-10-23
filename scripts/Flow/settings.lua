@@ -102,13 +102,13 @@ I.Settings.registerGroup({
         {
             key = "stateDive",
             name = "Dive",
-            description = "Pressing jump as a landing roll finishes carries the momentum into a dive. Requires Landing Roll.",
+            description = "Pressing jump as a landing roll finishes carries the momentum into a native jump with the dive animation over it. Cosmetic: no teleport. Requires Landing Roll.",
             default = true, renderer = "checkbox"
         },
         {
             key = "stateSkydive",
             name = "Skydive",
-            description = "A long enough fall from a long enough height goes into a skydive, with Acrobatics heavily boosted and steering on the movement keys.",
+            description = "A long enough fall from a long enough height goes into a skydive, with Acrobatics heavily boosted and the animation steering on the movement keys. Cosmetic: jump controls stay native, and pressing jump cancels it.",
             default = true, renderer = "checkbox"
         },
     }
@@ -126,28 +126,28 @@ I.Settings.registerGroup({
         {
             key = "skillChecks",
             name = "Skill Checks",
-            description = "Gate moves on Acrobatics, Agility and remaining fatigue. Vault and Mantle never refuse - a failed check makes them half speed instead. Off means every move is always available.",
+            description = "Measure Acrobatics, Agility and remaining fatigue against each move. A failed check never blocks the move: it botches it, so the landing becomes a stumble. Ledge Hang, Landing Roll, Ladder Climb and Skydive are never checked.",
             default = true, renderer = "checkbox"
         },
         {
             key = "skillDifficulty",
             name = "Skill Check Threshold",
-            description = "Scales every move's difficulty. 0.5 is half as demanding, 2.0 twice. At 0 every check passes while fatigue costs still apply.",
+            description = "Scales every move's difficulty. 0.5 is half as demanding, 2.0 twice. At 0 every check passes.",
             default = 1.0, renderer = "number",
             argument = { min = 0.0, max = 3.0 }
         },
         {
             key = "staminaScale",
             name = "Fatigue Cost",
-            description = "Scales the fatigue every move spends. 0 disables fatigue costs entirely; a move you cannot afford is refused, or made half speed for Vault and Mantle.",
+            description = "Scales the fatigue every move spends. 0 stops the spending. Fatigue is never a gate on its own - an empty bar lowers the skill check, it does not take the move away.",
             default = 1.0, renderer = "number",
             argument = { min = 0.0, max = 3.0 }
         },
         {
             key = "skydiveWindup",
             name = "Skydive Windup (seconds)",
-            description = "How long the skydive entry animation takes before the loop begins. The clip is 10 seconds of real time from its start key to its loop start, which no fall in Morrowind lasts, so it is played faster to fit. Lower is snappier.",
-            default = 2.0, renderer = "number",
+            description = "How long the skydive entry takes before release. The clip runs 5.5 seconds from its start key to its release key, longer than any fall here, so it is played faster to fit.",
+            default = 3.0, renderer = "number",
             argument = { min = 0.5, max = 10.0 }
         },
     }

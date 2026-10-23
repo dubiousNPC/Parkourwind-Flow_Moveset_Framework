@@ -7,27 +7,30 @@ local I = require('openmw.interfaces')
 local Settings = require('scripts/Flow/settings')
 local Body = require('scripts/Flow/core/body')
 
--- Height bands: vault 25-50%, mantle 51-80%, walljump 80-110%, hang 110-130%.
-local VAULT_MIN_FRAC  = 0.25
-local VAULT_MAX_FRAC  = 0.50
-local MANTLE_MAX_FRAC = 0.80
+-- Height bands, widened for reach: vault 18-58%, mantle to 95%, hang from
+-- 78% (core/optional/sensor_ext.lua). The bands overlap on purpose - the
+-- ladder resolves lowest-first, so an overlap costs nothing and a gap costs
+-- a refused move.
+local VAULT_MIN_FRAC  = 0.18
+local VAULT_MAX_FRAC  = 0.58
+local MANTLE_MAX_FRAC = 0.95
 
 local Sensor = {
 
     -- Detection reach (SharedRay is cast far beyond this; we just clip to it)
-    BASE_REACH = 70,
+    BASE_REACH = 95,
     VELOCITY_FACTOR = 0.20,
-    MAX_REACH = 160,
+    MAX_REACH = 200,
 
     -- Knee-height fallback scan (only fires when SharedRay misses)
     LOW_SCAN_HEIGHT = 25,       -- roughly shin/knee height above player origin
-    LOW_SCAN_REACH = 55,        -- deliberately short - "don't faceplant into a curb", not a long-range aim
-    LOW_SCAN_SIDE_OFFSET = 14,  -- narrow: just wide enough not to miss a dead-ahead hurdle, not a body-width fan
+    LOW_SCAN_REACH = 75,        -- deliberately short - "don't faceplant into a curb", not a long-range aim
+    LOW_SCAN_SIDE_OFFSET = 20,  -- narrow: just wide enough not to miss a dead-ahead hurdle, not a body-width fan
 
     -- Thresholds
     WALKABLE_SLOPE_Z = 0.65,
-    MIN_VAULT_ANGLE = 78.0,
-    VAULT_ALIGNMENT_THRESHOLD = -0.65,
+    MIN_VAULT_ANGLE = 70.0,
+    VAULT_ALIGNMENT_THRESHOLD = -0.50,
 
     HEAD_CLEARANCE = 120,   -- raised alongside the bigger Vault apex: only offer the move
                             -- when there's genuinely room overhead for the new arc

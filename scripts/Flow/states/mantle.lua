@@ -2,7 +2,6 @@
 -- Mantle. Climbs onto a waist-to-head surface.
 local BaseState = require('scripts/Flow/states/base_state')
 local SkillCheck = require('scripts/Flow/core/skill_check')
-local Anim = require('scripts/Flow/playerAnim')
 local types = require('openmw.types')
 local mwSelf = require('openmw.self')
 local util = require('openmw.util')
@@ -144,12 +143,7 @@ function MantleState:enter(syncData)
     local heightDiff = math.abs(targetPos.z - startPos.z)
     totalDuration = math.max(MIN_DURATION, heightDiff / CLIMB_SPEED_UNITS_PER_SEC)
 
-    -- Never refused: a failed check is half speed. See states/vault.lua.
-    if SkillCheck.evaluate("Mantle") == "degraded" then
-        totalDuration = totalDuration * 2.0
-        Anim.setSpeedScale(0.5)
-    end
-    SkillCheck.spend("Mantle")
+    SkillCheck.attempt("Mantle")
 
     local risePos = util.vector3(startPos.x, startPos.y, targetPos.z)
 
@@ -190,6 +184,7 @@ function MantleState:update(dt, syncData, inputData)
     end
 
     if timeInState >= totalDuration + COMPLETION_GRACE then
+        if SkillCheck.botched() then return "Stumble" end
         return "Idle"
     end
 

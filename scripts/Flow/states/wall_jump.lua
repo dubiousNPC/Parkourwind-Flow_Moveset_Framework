@@ -42,7 +42,6 @@ local levitating = false
 local entryYaw = 0
 local wallNormal = nil
 local pendingRise = 0
-local degraded = false
 
 local function applyLevitate(enable)
     if enable == levitating then return end
@@ -103,15 +102,8 @@ function WallJumpState:enter(syncData)
     launched = false
     launchDir = nil
     entryYaw = mwSelf.rotation:getYaw()
-    degraded = SkillCheck.evaluate("WallJump") ~= "ok"
-
-    if degraded then
-        self.abort = true
-        return
-    end
     self.abort = false
-
-    SkillCheck.spend("WallJump")
+    SkillCheck.attempt("WallJump")
 
     -- Read before the fortify, or the rise compounds it.
     pendingRise = riseHeight()

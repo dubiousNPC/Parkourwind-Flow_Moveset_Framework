@@ -1,0 +1,13 @@
+blending_rules:
+  - from: "*"
+    to: "*"
+    easing: "sineOut"
+    duration: 0.25
+  - from: "*"
+    to: "dbsdive: *"
+    easing: "sineOut"
+    duration: 0.11   # the tumble loop is 0.333s
+  - from: "*"
+    to: "dbsfall: *"
+    easing: "sineOut"
+    duration: 0.17   # clip is 1.0s, but the knockdown should land hard

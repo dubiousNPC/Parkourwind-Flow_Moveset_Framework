@@ -115,9 +115,9 @@ why: Roll and WallJump both hold a movement override that is load-bearing - Roll
 needs: Roll = true
 
 file: scripts/Flow/states/roll.lua
-why: the roll is uninterruptible except by knockdown or death. types.Actor.canMove covers dead, paralyzed AND knocked down in one call; the old isGrounded bail-out cut the animation when rolling off a ledge and is deliberately gone.
+why: the roll is uninterruptible except by knockdown or death. types.Actor.canMove covers dead, paralyzed AND knocked down in one call. The forbidden shape is the UNGUARDED ground bail that cut the animation when rolling off a ledge; the dive hand-off is a guarded return and is meant to be there.
 needs: types.Actor.canMove
-needs: not-present return "Airborne"
+needs: not-present if not syncData.isGrounded then
 
 file: scripts/Flow/states/airborne.lua
 why: WallJump detection is cast ONLY in the Jump trigger handler, never per frame. Its window and the Roll's minimum air time are what separate the two gestures, so one tap can never satisfy both.
@@ -264,21 +264,23 @@ needs: not-present pcall
 needs: I.Settings.registerPage({
 
 file: scripts/Flow/core/skill_check.lua
-why: Vault and Mantle must stay accessible. A failed check halves their speed instead of refusing, so DEGRADES is what keeps the two most-used moves from ever being taken away - every other move refuses.
-needs: DEGRADES = { Vault = true, Mantle = true }
-needs: evaluate
+why: a failed check NEVER blocks a move. Refusal and the Vault/Mantle half-speed both made the whole moveset feel unresponsive - and the half-speed doubled a state's movement override as well as its clip. The penalty is a botch: the move happens, then the landing is a stumble.
+needs: EXEMPT = { LedgeHang = true, Roll = true, Ladder = true, Skydive = true }
+needs: not-present refused
+needs: not-present affordable
+
+file: scripts/Flow/core/skill_check.lua
+why: there is no separate fatigue affordability gate. One existed ahead of the Settings.skillChecks() test, so turning skill checks OFF still left every move blocked or halved on low fatigue - which is exactly what "unresponsive even with skill disabled" was. Exhaustion belongs in the formula, through the fatigue term, and nowhere else.
+needs: FATIGUE_TERM_BASE
+needs: if not Settings.skillChecks() then return "ok" end
 
 file: scripts/Flow/core/skill_check.lua
 why: the check is deterministic, not a dice roll. The same wall must not pass on one press and fail on the next, or the priority ladder stops being predictable and every refusal reads as a bug.
 needs: not-present math.random
 
 file: scripts/Flow/states/ledge_hang.lua
-why: LedgeHang must NOT charge fatigue when Shimmy hands back to it. Shimmy returns here after every 30-unit step, so charging on entry billed one hang several times a second and drained fatigue in a few steps.
-needs: prevStateName ~= "Shimmy"
-
-file: scripts/Flow/states/ledge_hang.lua
-why: a Shimmy that will refuse must not be requested. It aborts straight back to LedgeHang, and the bounce restarted the hang pose every frame for as long as the key was held.
-needs: SkillCheck.evaluate("Shimmy") == "ok"
+why: LedgeHang is exempt from skill checks and must not reference them at all. Charging it on entry billed one hang several times a second, because Shimmy hands back here after every 30-unit step.
+needs: not-present SkillCheck
 
 file: scripts/Flow/states/wall_jump.lua
 why: the brace IS the input window. pwwalljump1 is 0.333s and the second jump press has to land inside it; a brace longer than its clip leaves the player hanging in a finished pose, and a shorter one makes the window unhittable.
@@ -297,10 +299,11 @@ file: scripts/Flow/global/flow_amf_backend.lua
 why: Glide takes a raw velocity. Boost derives v0z from apexHeight and is always upward, so it cannot drive Skydive's forward dive downward.
 needs: Glide
 
-file: scripts/Flow/states/skydive.lua
-why: Skydive hands back to Airborne when the ground comes up, so Roll and LedgeHang still get their chance instead of the skydive running into the floor.
-needs: CLEARANCE_RECHECK
-needs: hasClearance
+file: scripts/Flow/core/air_pose.lua
+why: Dive and Skydive are POSES, not states. As states they held the FSM for their whole duration, so nothing above them in the ladder was reachable while either ran - the "other states difficult to reach" report. Nothing in this file may move the actor.
+needs: not-present teleport
+needs: not-present sendGlobalEvent
+needs: function AirPose.update
 
 file: scripts/Flow/states/airborne.lua
 why: Skydive is tested BELOW the priority ladder and only once per airborne period. Above it, a long fall past a reachable ledge would have become a skydive instead of a hang.
@@ -308,10 +311,30 @@ needs: skydiveTried
 needs: SKYDIVE_ARM_TIME
 
 file: scripts/Flow/main.lua
-why: WallJump and Dive hold movement overrides. A state holding one without being listed in OVERRIDE_STATES has it released by the per-tick safety net on the next frame, silently.
+why: WallJump and Stumble hold movement overrides. A state holding one without being listed in OVERRIDE_STATES has it released by the per-tick safety net on the next frame, silently. Dive is no longer a state and must not come back as one.
 needs: WallJump = true
-needs: Dive = true
+needs: Stumble = true
+needs: not-present states/dive
 
 file: scripts/Flow/playerAnim.lua
 why: Skydive's windup and loop are both skydive1, and playGroup skips a replay of the group already playing. Anim.replay(true) is what forces the key change through.
 needs: function Anim.replay(force)
+
+file: scripts/Flow/states/airborne.lua
+why: Skydive arms as a pose, not a transition. Returning "Skydive" handed the FSM to it and took the whole ladder away for the rest of the fall.
+needs: AirPose.startSkydive()
+needs: not-present return "Skydive"
+
+file: scripts/Flow/states/airborne.lua
+why: a botched manoeuvre lands as a Stumble, ahead of the Roll it would otherwise have earned. The stumble IS the failure, so it must not be rollable.
+needs: return "Stumble"
+
+file: scripts/Flow/states/roll.lua
+why: the dive is a native jump. controls.jump is passed to the engine rather than a Boost being sent, because the Boost teleported the player through terrain.
+needs: mwSelf.controls.jump = diveArmed
+needs: AirPose.requestDive()
+needs: not-present FLOW_Boost_Start
+
+file: scripts/Flow/playerAnim.lua
+why: the skydive windup is read from the clip's own `skydive: release` key, so moving the key in the .kf retunes the mod without a code change.
+needs: skydive: release

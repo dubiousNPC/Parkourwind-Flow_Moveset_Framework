@@ -39,9 +39,8 @@ local function applyAcrobatics(enable)
 end
 
 function WallBoostState:enter(syncData)
-    self.abort = SkillCheck.evaluate("WallBoost") ~= "ok"
-    if self.abort then return end
-    SkillCheck.spend("WallBoost")
+    self.abort = false
+    SkillCheck.attempt("WallBoost")
 
     timeInState = 0
 
@@ -87,6 +86,7 @@ function WallBoostState:update(dt, syncData, inputData)
     end
 
     if syncData.isGrounded then
+        if SkillCheck.botched() then return "Stumble" end
         return "Idle"
     end
 

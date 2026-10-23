@@ -114,9 +114,8 @@ local function applySuspension(enable)
 end
 
 function ShimmyState:enter(syncData)
-    self.abort = SkillCheck.evaluate("Shimmy") ~= "ok"
-    if self.abort then return end
-    SkillCheck.spend("Shimmy")
+    self.abort = false
+    SkillCheck.attempt("Shimmy")
 
     timeInState = 0
     dir = pendingDir
@@ -153,8 +152,7 @@ function ShimmyState:update(dt, syncData, inputData)
     if self.abort then return "LedgeHang" end
     timeInState = timeInState + dt
 
-    if inputData.jump and Settings.stateEnabled("WallBoost")
-       and SkillCheck.evaluate("WallBoost") == "ok" then
+    if inputData.jump and Settings.stateEnabled("WallBoost") then
         WallBoostState.setLaunch(wallNormal, dir)
         resultLip, resultNormal = nil, nil
         return "WallBoost"

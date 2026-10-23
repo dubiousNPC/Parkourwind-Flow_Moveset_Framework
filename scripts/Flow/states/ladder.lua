@@ -6,7 +6,6 @@ local util = require('openmw.util')
 local nearby = require('openmw.nearby')
 local I = require('openmw.interfaces')
 local BaseState = require('scripts/Flow/states/base_state')
-local SkillCheck = require('scripts/Flow/core/skill_check')
 local Anim = require('scripts/Flow/playerAnim')
 local Settings = require('scripts/Flow/settings')
 local Owned = require('scripts/Flow/core/owned')
@@ -14,7 +13,7 @@ local Owned = require('scripts/Flow/core/owned')
 local LadderState = BaseState.new("Ladder")
 
 local CLIMB_SPEED = 110.0      -- units/sec, up or down
-local DETECT_REACH = 70.0      -- how far ahead to look for a ladder
+local DETECT_REACH = 95.0      -- how far ahead to look for a ladder
 local DETECT_HEIGHT = 70.0     -- cast from roughly chest height
 local WALL_OFFSET = 28.0       -- how far to sit off the ladder face
 local TOP_CLEARANCE = 40.0     -- headroom needed before stepping off the top
@@ -89,9 +88,7 @@ local function setClipFor(dir)
 end
 
 function LadderState:enter(syncData)
-    self.abort = SkillCheck.evaluate("Ladder") ~= "ok"
-    if self.abort then return end
-    SkillCheck.spend("Ladder")
+    self.abort = false
 
     wallNormal = pendingNormal
     lastDir = 0

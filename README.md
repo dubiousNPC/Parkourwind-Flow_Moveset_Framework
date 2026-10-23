@@ -43,16 +43,20 @@ reach of everything else.
 
 | | rung | gate |
 |---|---|---|
-| 1 | **Vault** | 25-50% of height, destination not blocked |
-| 2 | **Mantle** | 51-80%, destination not blocked |
-| 3 | **LedgeHang** | hands can reach the lip (85-130% of height), lip above the catch floor, **and the camera looking at or above level** |
+| 1 | **Vault** | 18-58% of height, destination not blocked |
+| 2 | **Mantle** | to 95%, destination not blocked |
+| 3 | **LedgeHang** | hands can reach the lip (78-138% of height), lip above the catch floor, **and the camera looking at or above level** |
 | 4 | **WallJump** | all three refused, wall contact, forward held, off cooldown |
-| 5 | **Skydive** | nothing else offered, 1.5s airborne, and 1400 units of air below |
 
-Skydive sits below the ladder on purpose and is tried once per airborne period:
-above it, a long fall past a reachable ledge would become a skydive instead of a
-hang. It also hands back to Airborne as soon as its clearance ray finds ground,
-so Roll and LedgeHang still get their chance on the way down.
+**The bands overlap on purpose.** The ladder resolves lowest-first, so an
+overlap costs nothing and a gap costs a refused move. The reach numbers were
+widened across the board in v0.81 - `BASE_REACH` 70→95, `MAX_REACH` 160→200,
+`LOW_SCAN_REACH` 55→75, `MIN_VAULT_ANGLE` 78→70°, the wall-jump window
+0.45→0.70s and its cooldown 2.0→1.2s, the ledge aim tolerance 16→34 units, the
+ladder reach 70→95 and the roll's minimum air time 1.0→0.75s.
+
+Skydive is **not** on this ladder. It is a pose, not a state (see below), so
+everything above stays reachable while it runs.
 
 Resolved in `states/airborne.lua`'s `update`, in that order. From the ground,
 `states/idle.lua` resolves Vault then Mantle; the other two are airborne-only.
@@ -75,8 +79,8 @@ given lip inside it for about two frames, which is why LedgeHang stopped firing
 at all.
 
 The window is therefore anchored on the hands and deliberately wider than the
-band: `HANDS_FRAC` 110%, `PROBE_BELOW` 25% and `PROBE_ABOVE` 20% give a 62-unit
-span, so a lip is caught while rising to it. 130% remains the ceiling.
+band: `HANDS_FRAC` 110%, `PROBE_BELOW` 32% and `PROBE_ABOVE` 28% give a 77-unit
+span at a 128-unit actor, so a lip is caught while rising to it.
 
 The aim test compares the **look direction** - camera position to whatever the
 camera ray hit - rather than that hit's absolute height. The absolute form
@@ -117,35 +121,38 @@ times. As of v0.79 every set agrees, which it did not before:
 
 | clip | length |
 |---|---|
+| `dbsdive` loop | 0.333s (lead 0.633, resolve 1.0) |
 | `pwwalljump1` (brace) | 0.333s |
 | `pwvault1/2/3`, `pwmantle1/2/3` | 0.40s |
 | `pwboostup`, `pwboostbkl/r`, `pwropeidle`, `skydivel/r` | 0.50s |
 | `pwladderidle` | 0.833s |
-| `pwropeup/dwn`, `skydivefwd` | 1.00s |
+| `pwropeup/dwn`, `skydivefwd`, `dbsfall` | 1.00s |
 | `pwroll1`, `pwwallhangidle` | 1.067s |
 | `pwropeup2` | 1.133s |
 | `pwfalling` | 1.50s (loops 0.033-1.467) |
 | `pwrun1` | 1.50s |
 | `pwladderdwn` | 2.50s |
 | `pwladderup` | 2.867s |
-| `skydive1` | windup 10.0s, then a 2.833s loop |
+| `skydive1` | `start` 0.5, `release` 5.967, loop 10.5-13.333 |
 
 Shimmy is keyed `pwshimmyl1`/`pwshimmyr1` in the three third-person sets and
 `pwshimmy1l`/`pwshimmy1r` in the three `.1st` sets. Both spellings are listed
 as interchangeable so either POV resolves.
 
 `pwwalljump2` was removed from every set and is no longer referenced.
-`pwropeup2` exists in the climbing files and is not yet used by any state.
+`pwropeup2` now exists only in `xbase_animkna/xClimbing1kna.kf`, since the human
+`xclimbing1.kf` files were deleted; nothing plays it yet either way.
 
 **One group, one file per folder.** Every `.kf` in `animations/<skeleton>/` is
 added as an animation source, so a group defined in two files in the same folder
 resolves by load order rather than by intent. Two live cases:
 
-- `xclimbing1.kf` and `xParkourwind1.kf` both declare `pwladderidle`,
-  `pwladderup`, `pwladderdwn` and the three rope groups, at different times
-  (`pwladderup` is 2.867s in one and 2.833s in the other). The climbing file is
-  the newer of the two - it is the only one with `pwropeup2` - so the ladder and
-  rope groups want removing from `xParkourwind1.kf`, not the reverse.
+- **Fixed for the human skeletons, still live for the beast one.**
+  `xbase_animkna/` has both `xClimbing1kna.kf` and `xParkourwind1kna.kf`
+  declaring `pwladderidle`, `pwladderup`, `pwladderdwn` and the three rope
+  groups, at different times (`pwladderup` is 2.867s in one and 2.833s in the
+  other). The human folders were resolved by deleting `xclimbing1.kf`; the same
+  decision is still outstanding here.
 - `xbase_animkna.1st/` shipped `xParkourwind1kna.kf` beside
   `xParkourwind1.1st.kf`, declaring the same groups with the pre-v0.79 timings
   and no `pwboostup` at all. That file is deleted here.
@@ -161,10 +168,10 @@ cancels the group. Visible time is `min(state window, clip / speed)`:
 | WallBoost | 0.52s | 0.50 / 1 = 0.50s |
 | WallJump brace | 0.333s | 0.333 / 1 = 0.333s |
 | WallJump boost | 0.50s | 0.50 / 1 = 0.50s |
-| Dive | 1.2s | looping |
+| Stumble | 1.00s | 1.00 / 1 = 1.00s |
 
-A failed Vault or Mantle check doubles the window *and* halves the speed, so
-both sides of that row scale together and the clip still fits.
+Dive and Skydive are not in this table: they are poses with no state window,
+and they resolve on their own clip keys.
 
 Shimmy is the exception: it ends on travelled distance, not a clock, and hands
 back to LedgeHang after each 30-unit step, so only as much of the 1.07s clip
@@ -182,54 +189,43 @@ group. Bottom-most rule wins. The overrides are sized against clip length
 *after* `speed`, which is why mantle's 0.4s clip gets 0.18s and vault's gets
 0.13s.
 
-## Skill checks and fatigue
+## Skill checks never block a move
 
-`core/skill_check.lua` is the only place a move's difficulty or cost is written
-down. One formula:
+`core/skill_check.lua` holds the only difficulty and cost numbers. One formula:
 
 ```
 chance = 30 + 0.55*Acrobatics + 0.35*(Agility - 50)
          scaled by Morrowind's own fatigue term, 1.25 - 0.5*(1 - fatigue/max)
 ```
 
-measured against a per-move difficulty that the **Skill Check Threshold**
-setting scales. The check is **deterministic, not a dice roll** - the same wall
-has to answer the same way twice, or the ladder stops being predictable and
-every refusal reads as a bug.
+A failed check **does not refuse the move and does not slow it down**. The move
+happens; `pwfalling` takes over while the player is still in the air, and the
+landing is a `Stumble` - `dbsfall`, one second, controls held. The stumble also
+pre-empts the landing roll, because the stumble *is* the failure.
 
-| move | difficulty | fatigue | failing the check |
-|---|---|---|---|
-| Ladder | 0 | 2 | - |
-| Vault | 10 | 4 | **half speed** |
-| Shimmy | 20 | 2 | refused |
-| Roll | 20 | 5 | - |
-| Mantle | 25 | 8 | **half speed** |
-| LedgeHang | 30 | 6 | refused |
-| Skydive | 35 | 0 | refused |
-| Dive | 40 | 10 | refused |
-| WallBoost | 45 | 12 | refused |
-| WallJump | 55 | 14 | refused |
+| move | difficulty | fatigue |
+|---|---|---|
+| LedgeHang, Roll, Ladder, Skydive | **exempt** | 0 |
+| Vault | 8 | 3 |
+| Shimmy | 15 | 2 |
+| Mantle | 18 | 6 |
+| Dive | 30 | 6 |
+| WallBoost | 35 | 8 |
+| WallJump | 45 | 10 |
 
-**Vault and Mantle never refuse.** A failed check doubles the move's duration
-and halves its animation speed, which is why `Anim.setSpeedScale` exists:
-stretching the move without stretching the clip cuts the clip.
+**There is no fatigue gate.** Exhaustion is already in the formula through the
+fatigue term, and nowhere else. An earlier affordability test sat *ahead* of the
+"are skill checks even on" question, so switching skill checks off still left
+every move blocked or halved on a low bar - which is exactly what "unresponsive
+even with skill disabled" was.
 
-Not enough fatigue counts as a failed check, so the two forgiving moves stay
-available when exhausted, slowly. **Fatigue Cost** at 0 stops the spending
-without disabling the checks; **Skill Checks** off makes every move available.
-
-Two charging rules that are not obvious:
-
-- **LedgeHang does not charge when Shimmy hands back to it.** Shimmy returns to
-  LedgeHang after every 30-unit step, so charging on entry billed one hang
-  several times a second.
-- **A move that would refuse is not requested.** LedgeHang tests Shimmy's check
-  before asking for it, and Shimmy tests WallBoost's, because a refused state
-  aborts straight back and the bounce restarts the pose every frame.
+A botch that ends on the ground (Vault, Mantle, WallBoost) resolves there; one
+that ends in the air resolves on landing; and `Idle` clears a stale flag so it
+can never survive into the next jump.
 
 ## WallJump, in two beats
 
-Jump into a wall, press jump again within 0.45s while touching it, and the
+Jump into a wall, press jump again within 0.70s while touching it, and the
 player **braces**: `pwwalljump1`, 0.333s, position pinned. The brace is the
 input window. Press jump once more inside it and the brace becomes a boost; let
 it run out and you fall, having earned nothing.
@@ -247,41 +243,41 @@ and a press toward the wall gives the vertical boost instead. Side detection is
 WallRun's own `SensorExt.updateWallRun`, called once here and nowhere else.
 
 The brace is a backend `Brace` move that holds the actor at a fixed position for
-its duration. That is the "temporary platform" of the first attempt without
-spawning anything, and the spawned platform mesh is exactly what had to be
-removed last time. Levitate is held across brace and launch, because the hop
-drives Z absolutely while engine gravity keeps accumulating.
+its duration - the "temporary platform" without spawning anything, since the
+spawned platform mesh is what had to be removed last time.
 
 There is no `pwboostl` / `pwboostr` in any shipped `.kf`. The lateral clips are
 `pwboostbkl` / `pwboostbkr`, which WallBoost already uses.
 
-## Dive and Skydive
+## Air poses: Dive, Skydive, and the botched fall
 
-**Dive.** A jump pressed in the last 0.30s of `pwroll1` carries the roll's
-momentum into the air with `pwfalling` looping over it. It takes no movement
-override, so air control stays vanilla and the pose is cosmetic; the arc is one
-`Boost` and then the engine owns it. Requires Landing Roll.
+`core/air_pose.lua` owns three cosmetic poses. **They are not states.** Airborne
+stays active and keeps resolving the priority ladder, so a dive or a skydive can
+still be interrupted by a vault, a mantle, a ledge or a wall jump. Nothing in
+that file moves the actor: no teleport, no lerp, no backend event. Both features
+were states in v0.80, which held the FSM for their whole duration and took the
+rest of the moveset away while they ran.
 
-**Skydive.** `skydive1` is one clip in two halves - a windup from `start`, then
-an idle between `loop start` and `loop stop`. FLOW plays them as two separate
-requests rather than trusting `loops = -1` to find the loop keys, which also
-makes the transition observable to the state.
+**Dive.** A jump pressed in the last 0.30s of `pwroll1` is passed straight to
+the engine as `controls.jump`, so the dive is a native jump. Roll hands over the
+moment the feet leave the ground. `dbsdive` then plays in three passes: the
+leaping lead-in (`start` → `loop start`, 0.633s), the tumble loop
+(`loop start` → `loop stop`, 0.333s) for as long as the player is in the air,
+and the resolve (`loop stop` → `stop`, 1.0s) once a downward ray finds ground
+within 260 units. The only mechanical effect is +40 Speed for 0.8s.
 
-The windup is **10.0s of clip** from `start` to `loop start`. No fall in
-Morrowind lasts that long: ten seconds under the engine's gravity is on the
-order of 28,000 units of drop, several cells of height and more than any terrain
-offers. So the windup is compressed by `speed` to the **Skydive Windup** setting
-(default 2.0s, so speed 5.0). That is a tuning knob, not a fix - the honest
-alternative is a shorter windup in the `.kf`.
+**Skydive.** Arms by itself after 1.2s airborne with 1200 units of air below,
+once per airborne period. Jump controls stay native throughout and **a jump
+press cancels it**. The only mechanical effect is +250 Acrobatics and +150 Jump,
+through `Owned`, so a save taken mid-skydive is undone on load.
 
-Steering: `skydivefwd` while forward is held, which also drives a `Glide` -
-forward 700, down 450, at reduced gravity, refreshed every 0.25s so the heading
-follows the camera. `skydivel` / `skydiver` on the strafe keys are pose-only.
-Straight-down skydiving runs on engine gravity and costs no teleports at all,
-which is the point: the per-frame teleport is paid only while actively diving.
-
-Acrobatics is fortified by 250 and Jump by 150 for the duration, through
-`Owned`, so a save taken mid-skydive is undone on load.
+`skydive1`'s windup runs from its `start` key to the author's own
+`skydive: release` key - 5.47 seconds of clip - and is played at whatever speed
+makes that take the **Skydive Windup** setting, 3.0s by default. The key is read
+at runtime with `animation.getTextKeyTime`, so moving it in the `.kf` retunes
+the mod without a code change. After release the pose switches to the clip's own
+`loop start`/`loop stop` idle, and the movement keys pick `skydivefwd`,
+`skydivel` or `skydiver` - pose only, no velocity of their own.
 
 ## Implementation notes
 
