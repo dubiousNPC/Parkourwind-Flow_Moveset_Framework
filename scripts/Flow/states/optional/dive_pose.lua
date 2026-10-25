@@ -1,0 +1,42 @@
+---@omw-context player
+-- Dive, parked in v0.82. Nothing requires this file.
+--
+-- It was a cosmetic air pose owned by core/air_pose.lua, not a state: a jump
+-- passed to the engine from the last 0.30s of pwroll1, with dbsdive played
+-- over the native jump and +40 Speed for 0.8s.
+--
+-- WHY IT STOPPED WORKING. dbsdive was re-cut between v0.81 and v0.82: it was
+-- 1.967s with `loop start` at 2.000 and `loop stop` at 2.333, and is now a
+-- flat 1.000s with start/stop only. The three-pass presentation below names
+-- keys that no longer exist, and playBlended on a missing START KEY is silent,
+-- exactly like a missing group. Revisiting this needs either the loop keys
+-- back or a single-pass clip.
+--
+-- To put it back:
+--
+--   1. playerAnim.lua GROUPS:
+--
+--        Dive = {
+--            variants = { lead = "dbsdive", loop = "dbsdive", land = "dbsdive" },
+--            variantStartKey = { loop = "loop start", land = "loop stop" },
+--            variantStopKey = { lead = "loop start", loop = "loop stop" },
+--            speed = 1,
+--            priority = PRIORITY_FLOW_MAJOR,
+--            blendMask = animation.BLEND_MASK.All,
+--            startKey = "start", stopKey = "stop",
+--        },
+--
+--   2. core/air_pose.lua: DIVE_LEAD 0.633, DIVE_RESOLVE 1.00,
+--      DIVE_SPEED_BONUS 40, DIVE_SPEED_DURATION 0.80, GROUND_NEAR 260,
+--      GROUND_CHECK_INTERVAL 0.15, plus startDive(), takeDiveRequest() and
+--      the lead -> loop -> land phase machine.
+--
+--   3. states/roll.lua: DIVE_WINDOW 0.30, the diveArmed latch, passing
+--      controls.jump through in the window, and handing to Airborne the moment
+--      the feet leave the ground. NEVER a Boost event - that teleported the
+--      player through terrain, which is why the first version was removed.
+--
+--   4. settings.lua: the stateDive toggle, and skill_check.lua's
+--      Dive = { difficulty = 30, fatigue = 6 }.
+
+return nil

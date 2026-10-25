@@ -46,7 +46,10 @@ reach of everything else.
 | 1 | **Vault** | 18-58% of height, destination not blocked |
 | 2 | **Mantle** | to 95%, destination not blocked |
 | 3 | **LedgeHang** | hands can reach the lip (78-138% of height), lip above the catch floor, **and the camera looking at or above level** |
-| 4 | **WallJump** | all three refused, wall contact, forward held, off cooldown |
+
+WallJump was rung 4 until v0.82 and is parked in `states/optional/`; see that
+folder's README for the exact rung it occupied and what has to come back with
+it.
 
 **The bands overlap on purpose.** The ladder resolves lowest-first, so an
 overlap costs nothing and a gap costs a refused move. The reach numbers were
@@ -65,10 +68,6 @@ The camera gate uses `I.SharedRay`, which is camera-aimed, and compares its hit
 height to the lip. That answers "pitched up towards the target" without
 depending on a pitch sign convention. No SharedRay means no gate.
 
-WallJump is driven by a jump **edge**, not held jump: the trigger handler sets a
-flag and the ladder consumes it, so the three lower rungs get first refusal on
-the same frame. Holding jump keeps Vault, Mantle and LedgeHang live as before.
-The wall ray is only cast once the ladder reaches rung 4.
 
 ## LedgeHang reach
 
@@ -121,27 +120,66 @@ times. As of v0.79 every set agrees, which it did not before:
 
 | clip | length |
 |---|---|
-| `dbsdive` loop | 0.333s (lead 0.633, resolve 1.0) |
 | `pwwalljump1` (brace) | 0.333s |
 | `pwvault1/2/3`, `pwmantle1/2/3` | 0.40s |
 | `pwboostup`, `pwboostbkl/r`, `pwropeidle`, `skydivel/r` | 0.50s |
 | `pwladderidle` | 0.833s |
-| `pwropeup/dwn`, `skydivefwd`, `dbsfall` | 1.00s |
+| `pwropeup/dwn`, `skydivefwd`, `dbsfall`, `dbsdive` | 1.00s |
 | `pwroll1`, `pwwallhangidle` | 1.067s |
-| `pwropeup2` | 1.133s |
 | `pwfalling` | 1.50s (loops 0.033-1.467) |
 | `pwrun1` | 1.50s |
 | `pwladderdwn` | 2.50s |
 | `pwladderup` | 2.867s |
-| `skydive1` | `start` 0.5, `release` 5.967, loop 10.5-13.333 |
+| `skydive1` (windup) | 9.967s, `release` at 5.967 |
+| `skydive` (idle) | 2.867s, loops 10.533-13.333 |
 
 Shimmy is keyed `pwshimmyl1`/`pwshimmyr1` in the three third-person sets and
 `pwshimmy1l`/`pwshimmy1r` in the three `.1st` sets. Both spellings are listed
 as interchangeable so either POV resolves.
 
 `pwwalljump2` was removed from every set and is no longer referenced.
-`pwropeup2` now exists only in `xbase_animkna/xClimbing1kna.kf`, since the human
-`xclimbing1.kf` files were deleted; nothing plays it yet either way.
+`pwropeup2` is gone with the last `xClimbing1kna.kf`; nothing played it.
+
+**`dbsdive` was re-cut in v0.82** from 1.967s with `loop start` / `loop stop` to
+a flat 1.000s with start/stop only. That silently unplayed Dive's loop and land
+passes, which named those keys - and is why `tools/check_anims.py` now verifies
+the keys a slot names and not just that start and stop exist.
+
+**One group, one file per folder.** Every `.kf` in `animations/<skeleton>/` is
+added as an animation source, so a group defined in two files in the same folder
+resolves by load order rather than by intent. Resolved in v0.81-82 by deleting
+the `xclimbing1.kf` / `xClimbing1kna.kf` duplicates; no folder now declares a
+group twice.
+
+Measured clip lengths, used to set state durations, animation speeds and blend
+times. As of v0.79 every set agrees, which it did not before:
+
+| clip | length |
+|---|---|
+| `pwwalljump1` (brace) | 0.333s |
+| `pwvault1/2/3`, `pwmantle1/2/3` | 0.40s |
+| `pwboostup`, `pwboostbkl/r`, `pwropeidle`, `skydivel/r` | 0.50s |
+| `pwladderidle` | 0.833s |
+| `pwropeup/dwn`, `skydivefwd`, `dbsfall`, `dbsdive` | 1.00s |
+| `pwroll1`, `pwwallhangidle` | 1.067s |
+| `pwfalling` | 1.50s (loops 0.033-1.467) |
+| `pwrun1` | 1.50s |
+| `pwladderdwn` | 2.50s |
+| `pwladderup` | 2.867s |
+| `skydive1` (windup) | 9.967s, `release` at 5.967 |
+| `skydive` (idle) | 2.867s, loops 10.533-13.333 |
+
+Shimmy is keyed `pwshimmyl1`/`pwshimmyr1` in the three third-person sets and
+`pwshimmy1l`/`pwshimmy1r` in the three `.1st` sets. Both spellings are listed
+as interchangeable so either POV resolves.
+
+`pwwalljump2` was removed from every set and is no longer referenced.
+`pwropeup2` is gone with the last `xClimbing1kna.kf`; nothing played it.
+
+**`dbsdive` was re-cut in v0.82** from 1.967s with `loop start` / `loop stop` to
+a flat 1.000s with start/stop only. That silently unplayed Dive's loop and land
+passes, which named those keys - and is why `tools/check_anims.py` now verifies
+the keys a slot names and not just that start and stop exist.
 
 **One group, one file per folder.** Every `.kf` in `animations/<skeleton>/` is
 added as an animation source, so a group defined in two files in the same folder
@@ -166,12 +204,11 @@ cancels the group. Visible time is `min(state window, clip / speed)`:
 | Mantle | `max(0.58, rise/200) + 0.06` ≥ 0.64s | 0.40 / 0.7 = 0.57s |
 | Roll | 1.07s | 1.067 / 1 = 1.07s |
 | WallBoost | 0.52s | 0.50 / 1 = 0.50s |
-| WallJump brace | 0.333s | 0.333 / 1 = 0.333s |
-| WallJump boost | 0.50s | 0.50 / 1 = 0.50s |
 | Stumble | 1.00s | 1.00 / 1 = 1.00s |
+| Knockdown | 1.50s | 1.50 / 1 = 1.50s |
 
-Dive and Skydive are not in this table: they are poses with no state window,
-and they resolve on their own clip keys.
+Skydive is not in this table: it is a pose with no state window, and it
+resolves on its own clip keys.
 
 Shimmy is the exception: it ends on travelled distance, not a clock, and hands
 back to LedgeHang after each 30-unit step, so only as much of the 1.07s clip
@@ -223,61 +260,60 @@ A botch that ends on the ground (Vault, Mantle, WallBoost) resolves there; one
 that ends in the air resolves on landing; and `Idle` clears a stale flag so it
 can never survive into the next jump.
 
-## WallJump, in two beats
+## Air poses: Skydive and the botched fall
 
-Jump into a wall, press jump again within 0.70s while touching it, and the
-player **braces**: `pwwalljump1`, 0.333s, position pinned. The brace is the
-input window. Press jump once more inside it and the brace becomes a boost; let
-it run out and you fall, having earned nothing.
-
-| second press | clip | launch |
-|---|---|---|
-| no lateral intent | `pwboostup` | vertical `Hop`, Acrobatics-scaled |
-| steering away from the wall | `pwboostbkl` / `pwboostbkr` | ballistic `Boost`, 120 apex, 420 lateral |
-
-Lateral intent is the strafe keys first, then **camera swing** since entry - in
-third person the body turns with the camera, so a swing is how a mouse-only
-player asks for it. It only fires *away* from the wall: `wallNormal` points out
-of the wall, so the sign of `right:dot(wallNormal)` says which side it is on,
-and a press toward the wall gives the vertical boost instead. Side detection is
-WallRun's own `SensorExt.updateWallRun`, called once here and nowhere else.
-
-The brace is a backend `Brace` move that holds the actor at a fixed position for
-its duration - the "temporary platform" without spawning anything, since the
-spawned platform mesh is what had to be removed last time.
-
-There is no `pwboostl` / `pwboostr` in any shipped `.kf`. The lateral clips are
-`pwboostbkl` / `pwboostbkr`, which WallBoost already uses.
-
-## Air poses: Dive, Skydive, and the botched fall
-
-`core/air_pose.lua` owns three cosmetic poses. **They are not states.** Airborne
-stays active and keeps resolving the priority ladder, so a dive or a skydive can
-still be interrupted by a vault, a mantle, a ledge or a wall jump. Nothing in
-that file moves the actor: no teleport, no lerp, no backend event. Both features
-were states in v0.80, which held the FSM for their whole duration and took the
-rest of the moveset away while they ran.
-
-**Dive.** A jump pressed in the last 0.30s of `pwroll1` is passed straight to
-the engine as `controls.jump`, so the dive is a native jump. Roll hands over the
-moment the feet leave the ground. `dbsdive` then plays in three passes: the
-leaping lead-in (`start` → `loop start`, 0.633s), the tumble loop
-(`loop start` → `loop stop`, 0.333s) for as long as the player is in the air,
-and the resolve (`loop stop` → `stop`, 1.0s) once a downward ray finds ground
-within 260 units. The only mechanical effect is +40 Speed for 0.8s.
+`core/air_pose.lua` owns two cosmetic poses. **They are not states.** Airborne
+stays active and keeps resolving the priority ladder, so a skydive can still be
+interrupted by a vault, a mantle or a ledge. Nothing in that file moves the
+actor: no teleport, no lerp, no backend event, and a marker enforces that.
 
 **Skydive.** Arms by itself after 1.2s airborne with 1200 units of air below,
 once per airborne period. Jump controls stay native throughout and **a jump
 press cancels it**. The only mechanical effect is +250 Acrobatics and +150 Jump,
 through `Owned`, so a save taken mid-skydive is undone on load.
 
-`skydive1`'s windup runs from its `start` key to the author's own
-`skydive: release` key - 5.47 seconds of clip - and is played at whatever speed
-makes that take the **Skydive Windup** setting, 3.0s by default. The key is read
-at runtime with `animation.getTextKeyTime`, so moving it in the `.kf` retunes
-the mod without a code change. After release the pose switches to the clip's own
-`loop start`/`loop stop` idle, and the movement keys pick `skydivefwd`,
-`skydivel` or `skydiver` - pose only, no velocity of their own.
+`xSkyFall.kf` splits the move across **two groups** as of v0.82, which is what
+makes the hand-over smooth: `skydive1` is the windup, and `skydive` is a
+separate looping group with its own `loop start` / `loop stop`. Before the
+split both halves were `skydive1` played with different keys, which needed a
+forced replay of the group already playing.
+
+The windup runs from `skydive1: start` to the author's own `skydive1: release`
+key — 5.47 seconds of clip — played at whatever speed makes that take the
+**Skydive Windup** setting, 3.0s by default. The key is read at runtime with
+`animation.getTextKeyTime`, so moving it in the `.kf` retunes the mod without a
+code change. After release the pose switches to `skydive`, and the movement keys
+pick `skydivefwd`, `skydivel` or `skydiver` — pose only, no velocity of their
+own.
+
+**The botched fall.** `pwfalling`, looping, shown while a failed skill check is
+outstanding and the player is still in the air.
+
+## The landing you did not choose
+
+`states/stumble.lua` is one state with two presentations:
+
+| kind | clip | length | priority | when |
+|---|---|---|---|---|
+| `stumble` | `dbsfall` | 1.00s | FLOW_MAJOR | a botched manoeuvre |
+| `knockdown` | `pwfalling` | 1.50s | **Scripted** | landing a released skydive |
+
+Both hold the movement override and zero the controls for the clip's length,
+then return to Idle. A skydive landing is checked **ahead** of both the botch
+and the roll: it is the end of the fall, not a manoeuvre to recover from.
+
+**There is no Lua setter for an engine knockdown.** `types.Actor.canMove()` only
+reads one, and nothing in `openmw.types` sets it. So this is a held-controls
+equivalent, which has the advantage of not depending on the fall damage landing
+hard enough — and the skydive's +250 Acrobatics means it often would not. The
+`Scripted` priority is what puts the pose over whatever the engine is doing,
+including its own knockdown if the fall does trigger one.
+
+`Scripted` is used here as a **uniform** tuple, which `core/anim_priority.lua`
+warns against everywhere else. It is safe in this one place: the tuples the
+engine builds constantly are shield (`Block`), torch (`Torch`) and hit (`Hit`),
+and it never plays at uniform `Scripted` — only mwscript `PlayGroup` and other
+mods' scripted animations do.
 
 ## Implementation notes
 

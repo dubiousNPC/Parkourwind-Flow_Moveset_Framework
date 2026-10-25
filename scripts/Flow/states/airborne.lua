@@ -1,5 +1,5 @@
 ---@omw-context player
--- Airborne. Owns Roll arming and WallJump entry.
+-- Airborne. Owns the priority ladder, Roll arming and the air poses.
 local BaseState = require('scripts/Flow/states/base_state')
 local core = require('openmw.core')
 local I = require('openmw.interfaces')
@@ -17,11 +17,9 @@ local InputManager = require('scripts/Flow/core/input')
 local VaultState = require('scripts/Flow/states/vault')
 local MantleState = require('scripts/Flow/states/mantle')
 local Settings = require('scripts/Flow/settings')
-local Body = require('scripts/Flow/core/body')
 local Owned = require('scripts/Flow/core/owned')
-local EngineSync = require('scripts/Flow/core/engine_sync')
-local WallJumpState = require('scripts/Flow/states/wall_jump')
 local AirPose = require('scripts/Flow/core/air_pose')
+local StumbleState = require('scripts/Flow/states/stumble')
 local SkillCheck = require('scripts/Flow/core/skill_check')
 
 local AirborneState = BaseState.new("Airborne")
@@ -34,13 +32,6 @@ local FORWARD_DEADZONE = 0.1
 
 local ROLL_MIN_AIR_TIME = 0.75
 
-local WALL_JUMP_WINDOW = 0.70
-local WALL_JUMP_COOLDOWN = 1.2
-
-local WALL_CONTACT_MARGIN = 18.0
-
-local WALL_CONTACT_HEIGHT = 70.0
-
 -- Skydive arms on its own after a sustained fall, with real air below.
 local SKYDIVE_ARM_TIME = 1.2
 local SKYDIVE_CLEARANCE = 1200.0
@@ -48,17 +39,8 @@ local SKYDIVE_CLEARANCE = 1200.0
 local armed = false
 local timeAirborne = 0
 local isActive = false
-local jumpEdge = false
-local wallJumpReadyAt = 0
-local wallJumpLanding = nil
 local agilityApplied = false
 local skydiveTried = false
-local lastWallNormal = nil
-
--- One wall jump per confirmed landing, counted by EngineSync.
-local function wallJumpSpent(syncData)
-    return wallJumpLanding ~= nil and wallJumpLanding == syncData.landings
-end
 
 local function applyAgility(enable)
     if enable == agilityApplied then return end
@@ -67,12 +49,6 @@ local function applyAgility(enable)
     Owned.effect(core.magic.EFFECT_TYPE.FortifyAttribute, amount, 'agility')
     agilityApplied = enable
 end
-
--- No HeightMap: terrain slopes were reading as walls.
-local WALL_RAY_OPTS = {
-    ignore = mwSelf,
-    collisionType = nearby.COLLISION_TYPE.World + nearby.COLLISION_TYPE.Door
-}
 
 -- Camera aimed at or above the lip. SharedRay is camera-aimed, so no pitch sign.
 local function lookingAtLedge(targetPos)
@@ -97,29 +73,9 @@ local function skydiveClearance()
         pos - util.vector3(0, 0, SKYDIVE_CLEARANCE), DOWN_RAY_OPTS).hit
 end
 
--- One ray, straight ahead, cast only on the keypress.
-local function wallContact()
-    local reach = Body.halfWidth() + WALL_CONTACT_MARGIN
-    local pos = mwSelf.position
-    local origin = util.vector3(pos.x, pos.y, pos.z + WALL_CONTACT_HEIGHT)
-
-    local yaw = mwSelf.rotation:getYaw()
-    local fwd = util.transform.rotateZ(yaw):apply(util.vector3(0, 1, 0))
-
-    local res = nearby.castRay(origin, origin + fwd * reach, WALL_RAY_OPTS)
-    if not (res.hit and res.hitNormal ~= nil) then return false end
-    if res.hitNormal.z >= Sensor.WALKABLE_SLOPE_Z then return false end
-    lastWallNormal = res.hitNormal
-    return true
-end
-
 input.registerTriggerHandler("Jump", async:callback(function()
     if core.isWorldPaused() then return end
     if not isActive then return end
-
-    if InputManager.intents.moveVector.y > FORWARD_DEADZONE then
-        jumpEdge = true
-    end
 
     if armed then return end
 
@@ -147,15 +103,12 @@ if I.AnimationController and I.AnimationController.addTextKeyHandler then
 end
 
 function AirborneState.getRollDebug()
-    local wj = wallJumpSpent(EngineSync.data) and " WJ-used"
-        or (timeAirborne <= WALL_JUMP_WINDOW and " WJ-ready" or "")
-
     if armed then
-        return string.format("ROLL: ARMED air=%.2f%s%s %s", timeAirborne,
-            landedSignal and " LANDKEY" or "", wj, AirPose.debugString())
+        return string.format("ROLL: ARMED air=%.2f%s %s", timeAirborne,
+            landedSignal and " LANDKEY" or "", AirPose.debugString())
     end
-    return string.format("ROLL: idle air=%.2f fwd=%.2f%s %s", timeAirborne,
-        InputManager.intents.moveVector.y, wj, AirPose.debugString())
+    return string.format("ROLL: idle air=%.2f fwd=%.2f %s", timeAirborne,
+        InputManager.intents.moveVector.y, AirPose.debugString())
 end
 
 local healthBeforeLanding = nil
@@ -165,14 +118,8 @@ function AirborneState:enter(syncData)
     healthBeforeLanding = types.Actor.stats.dynamic.health(mwSelf).current
     armed = false
     timeAirborne = 0
-    jumpEdge = false
     landedSignal = false
     skydiveTried = false
-
-    if AirPose.takeDiveRequest() and Settings.stateEnabled("Dive") then
-        SkillCheck.attempt("Dive")
-        AirPose.startDive()
-    end
 end
 
 function AirborneState:exit()
@@ -184,18 +131,15 @@ end
 function AirborneState:update(dt, syncData, inputData)
     timeAirborne = timeAirborne + dt
 
-    -- PRIORITY LADDER. Lowest available action wins; WallJump is the last
-    -- resort, for when the top is out of reach of all three. See README.
+    -- PRIORITY LADDER. Lowest available action wins. See README.
     if inputData.jump then
         if Sensor.data.interaction == "Vault"
            and not VaultState.isBlocked(Sensor.data.targetPos) then
-            jumpEdge = false
             return "Vault"
         end
 
         if Sensor.data.interaction == "Mantle"
            and not MantleState.isBlocked(Sensor.data.targetPos) then
-            jumpEdge = false
             return "Mantle"
         end
 
@@ -203,24 +147,8 @@ function AirborneState:update(dt, syncData, inputData)
            and lookingAtLedge(SensorExt.data.targetPos) then
             local handsZ = mwSelf.position.z + SensorExt.grabFloorHeight()
             if SensorExt.data.targetPos.z > handsZ then
-                jumpEdge = false
                 return "LedgeHang"
             end
-        end
-    end
-
-    if jumpEdge then
-        jumpEdge = false
-        if not wallJumpSpent(syncData)
-           and Sensor.data.tooHigh
-           and timeAirborne <= WALL_JUMP_WINDOW
-           and core.getRealTime() >= wallJumpReadyAt
-           and Settings.stateEnabled("WallJump")
-           and wallContact() then
-            wallJumpLanding = syncData.landings
-            wallJumpReadyAt = core.getRealTime() + WALL_JUMP_COOLDOWN
-            WallJumpState.setWallNormal(lastWallNormal)
-            return "WallJump"
         end
     end
 
@@ -249,12 +177,24 @@ function AirborneState:update(dt, syncData, inputData)
 
     landedSignal = false
     applyAgility(false)
+
+    -- A released skydive lands as a knockdown, ahead of everything else: it is
+    -- the end of the fall, not a manoeuvre to recover from.
+    local skydiveLanding = AirPose.takeSkydiveLanding()
     AirPose.clear()
+
+    if skydiveLanding then
+        armed = false
+        SkillCheck.clearBotch()
+        StumbleState.request("knockdown")
+        return "Stumble"
+    end
 
     -- A botched manoeuvre is paid for here, ahead of the roll it would have
     -- earned: the stumble IS the failure, so it cannot be rolled out of.
     if SkillCheck.botched() then
         armed = false
+        StumbleState.request("stumble")
         return "Stumble"
     end
 

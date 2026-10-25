@@ -106,10 +106,6 @@ why: the soft dependency is tested with vfs.fileExists, not pcall(require). The 
 needs: vfs.fileExists
 needs: not-present pcall
 
-file: scripts/Flow/playerAnim.lua
-why: the WallJump animation group is pwwalljump1 WITH the digit. The removed WallJump named "pwwalljump", which exists in none of the three shipped .kf sets, and the full-body blend mask then masked out vanilla's animation with nothing to replace it - that was the T-pose.
-needs: pwwalljump1
-
 file: scripts/Flow/main.lua
 why: Roll and WallJump both hold a movement override that is load-bearing - Roll uses it to suppress jump and drive forward motion. A state holding an override without being listed in OVERRIDE_STATES has it released on the next tick by the safety net, silently, and the feature just looks broken.
 needs: Roll = true
@@ -119,12 +115,6 @@ why: the roll is uninterruptible except by knockdown or death. types.Actor.canMo
 needs: types.Actor.canMove
 needs: not-present if not syncData.isGrounded then
 
-file: scripts/Flow/states/airborne.lua
-why: WallJump detection is cast ONLY in the Jump trigger handler, never per frame. Its window and the Roll's minimum air time are what separate the two gestures, so one tap can never satisfy both.
-needs: WALL_JUMP_WINDOW
-needs: ROLL_MIN_AIR_TIME
-needs: WALL_JUMP_COOLDOWN
-
 file: scripts/Flow/core/body.lua
 why: actor dimensions come from getBoundingBox, not a hardcoded 128. Wrong for beast races, NPC.setScale and any body mod; every height band and the wall-jump reach derive from it.
 needs: getBoundingBox
@@ -132,20 +122,6 @@ needs: getBoundingBox
 file: scripts/Flow/global/flow_amf_backend.lua
 why: WallJump uses the Hop move type, not Boost. Boost integrates a velocity and teleports to position+v*dt, which double-applies gravity (the engine already moved the actor) and launched at ~970 u/s. Hop drives Z on a fixed curve and reads X/Y live so engine movement and collision still apply.
 needs: Hop
-
-file: scripts/Flow/states/airborne.lua
-why: the wall jump must NOT re-arm in enter(). WallJump exits back into Airborne, so re-arming on entry gives an unlimited vertical climb. It re-arms on the next confirmed landing, counted by EngineSync.
-needs: wallJumpLanding = syncData.landings
-needs: not-present wallJumpUsed = false
-
-# NOTE ON WHAT CANNOT BE GUARDED HERE. This record first also carried
-# `needs: velocity_getter_research.md`, pointing at the doc that explains the
-# decision. It can never pass: that pointer lives in a comment in the file
-# header, and this checker strips comments before matching precisely so a
-# comment cannot satisfy a marker. The checker was right and the marker was
-# wrong - a decision recorded in prose is documentation, not something a
-# mechanical check can hold in place. Only the code-level guard below belongs
-# here. Don't re-add it.
 
 file: scripts/Flow/core/engine_sync.lua
 why: the differencing must NOT be swapped for types.Actor.getCurrentSpeed until its semantics are settled - if it includes the vertical component it silently retunes Vault/Mantle reach during any fall, arriving disguised as a performance change. See docs/velocity_getter_research.md before removing this marker.
@@ -161,12 +137,6 @@ file: scripts/Flow/playerAnim.lua
 why: FLOW's default priority must out-rank the engine. Jump is 4 and Movement is 5, and equal priority in all four bone groups means NEITHER animation is visible - that was the mid-air tie and the on-the-ground loss.
 needs: not-present BONE_GROUP.Torso] = animation.PRIORITY.Jump
 
-file: scripts/Flow/states/airborne.lua
-why: priority ladder. Vault, then Mantle, then LedgeHang, then WallJump last - WallJump used to be consumed at the top of update() and pre-empted every other action.
-needs: jumpEdge
-needs: lookingAtLedge
-needs: not-present wallJumpRequested
-
 file: scripts/Flow/states/roll.lua
 why: ROLL_DURATION must not be shorter than pwroll1 (1.07s) or the state ends mid-clip.
 needs: ROLL_DURATION = 1.07
@@ -180,7 +150,7 @@ why: a landing counts only after the feet have been down for GROUND_CONFIRM. A s
 needs: GROUND_CONFIRM
 needs: landings
 
-file: scripts/Flow/states/wall_jump.lua
+file: scripts/Flow/states/optional/wall_jump.lua
 why: Levitate is held for the duration of the hop. The hop drives Z absolutely while engine gravity keeps accumulating, so without it the actor drops at full accumulated speed the instant the hop ends - the "sudden teleport" feel.
 needs: LEVITATE_MAG
 needs: BRACE_DURATION
@@ -234,11 +204,6 @@ file: scripts/Flow/playerAnim.lua
 why: the availability cache must be dropped on a model rebuild. First and third person load different animation sources, so an answer cached in one POV is wrong in the other.
 needs: forgetGroupAvailability
 
-file: scripts/Flow/playerAnim.lua
-why: WallJump's clips play at their authored speed. The clip has been re-cut twice - 0.23s, then 0.667s, now a 0.333s brace plus a 0.5s boost - and each time a leftover speed multiplier stretched it past the state window and cut it. Any speed here has to be re-derived from tools/check_anims.py, not carried over.
-needs: brace = "pwwalljump1"
-needs: up = "pwboostup"
-
 file: scripts/Flow/states/mantle.lua
 why: MIN_DURATION must not be shorter than pwmantle at its play speed - 0.4s at speed .7 is 0.571s. At 0.35 a low mantle cut the clip at 72%.
 needs: MIN_DURATION = 0.58
@@ -282,12 +247,12 @@ file: scripts/Flow/states/ledge_hang.lua
 why: LedgeHang is exempt from skill checks and must not reference them at all. Charging it on entry billed one hang several times a second, because Shimmy hands back here after every 30-unit step.
 needs: not-present SkillCheck
 
-file: scripts/Flow/states/wall_jump.lua
+file: scripts/Flow/states/optional/wall_jump.lua
 why: the brace IS the input window. pwwalljump1 is 0.333s and the second jump press has to land inside it; a brace longer than its clip leaves the player hanging in a finished pose, and a shorter one makes the window unhittable.
 needs: BRACE_DURATION = 0.333
 needs: jumpPressed
 
-file: scripts/Flow/states/wall_jump.lua
+file: scripts/Flow/states/optional/wall_jump.lua
 why: the lateral launch only fires away from the wall. wallNormal points out of the wall, so the sign of right:dot(normal) says which side it is on; without that test a sideways boost drove the player into the wall they were pushing off.
 needs: rightVector():dot(wallNormal)
 
@@ -311,10 +276,10 @@ needs: skydiveTried
 needs: SKYDIVE_ARM_TIME
 
 file: scripts/Flow/main.lua
-why: WallJump and Stumble hold movement overrides. A state holding one without being listed in OVERRIDE_STATES has it released by the per-tick safety net on the next frame, silently. Dive is no longer a state and must not come back as one.
-needs: WallJump = true
+why: Stumble holds a movement override. A state holding one without being listed in OVERRIDE_STATES has it released by the per-tick safety net on the next frame, silently. Dive is no longer a state and must not come back as one.
 needs: Stumble = true
 needs: not-present states/dive
+needs: not-present states/wall_jump
 
 file: scripts/Flow/playerAnim.lua
 why: Skydive's windup and loop are both skydive1, and playGroup skips a replay of the group already playing. Anim.replay(true) is what forces the key change through.
@@ -329,12 +294,30 @@ file: scripts/Flow/states/airborne.lua
 why: a botched manoeuvre lands as a Stumble, ahead of the Roll it would otherwise have earned. The stumble IS the failure, so it must not be rollable.
 needs: return "Stumble"
 
-file: scripts/Flow/states/roll.lua
-why: the dive is a native jump. controls.jump is passed to the engine rather than a Boost being sent, because the Boost teleported the player through terrain.
-needs: mwSelf.controls.jump = diveArmed
-needs: AirPose.requestDive()
-needs: not-present FLOW_Boost_Start
-
 file: scripts/Flow/playerAnim.lua
 why: the skydive windup is read from the clip's own `skydive: release` key, so moving the key in the .kf retunes the mod without a code change.
-needs: skydive: release
+needs: skydive1: release
+
+file: scripts/Flow/states/airborne.lua
+why: the priority ladder is Vault, then Mantle, then LedgeHang, in that order, and the ledge rung is gated on the camera. WallJump used to sit under it and is parked in states/optional/; nothing may be added above LedgeHang without re-reading README's Action priority.
+needs: lookingAtLedge
+needs: not-present return "WallJump"
+
+file: scripts/Flow/core/air_pose.lua
+why: Dive is parked. Bringing startDive() back here without the rest of states/optional/dive_pose.lua gives a pose with no arming and no Speed bonus.
+needs: not-present startDive
+
+file: scripts/Flow/states/stumble.lua
+why: two presentations, one state. "knockdown" is the skydive landing and plays at Scripted priority over whatever the engine is doing; "stumble" is the botched manoeuvre. There is NO Lua setter for an engine knockdown - canMove() only reads one - so the controls are held for the clip instead.
+needs: DURATION = { stumble = 1.00, knockdown = 1.50 }
+needs: types.Actor.canMove
+
+file: scripts/Flow/playerAnim.lua
+why: the skydive hand-over is a GROUP change. skydive1 is the windup and `skydive` is a separate looping group as of v0.82; before the split both halves were skydive1 played with different keys, which needed a forced replay.
+needs: entry = "skydive1"
+needs: loop = "skydive"
+
+file: tools/check_anims.py
+why: the check verifies the KEYS each slot names, not just start/stop. dbsdive lost its `loop start` and `loop stop` keys in a re-cut and Dive's loop and land passes went silent while this checker still reported them fine - playBlended on a missing start key is as silent as a missing group.
+needs: keytable
+needs: sk in sets[d].get(g, {})

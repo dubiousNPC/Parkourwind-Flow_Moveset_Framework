@@ -1,3 +1,3 @@
-# Flow - Community Moveset Framework v0.81
+# Flow - Community Moveset Framework v0.82
 
 

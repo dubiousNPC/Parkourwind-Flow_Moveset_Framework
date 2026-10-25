@@ -23,8 +23,6 @@ local MOVES = {
     Mantle    = { difficulty = 18, fatigue = 6 },
     Shimmy    = { difficulty = 15, fatigue = 2 },
     WallBoost = { difficulty = 35, fatigue = 8 },
-    WallJump  = { difficulty = 45, fatigue = 10 },
-    Dive      = { difficulty = 30, fatigue = 6 },
 }
 
 local function fatigueRatio()

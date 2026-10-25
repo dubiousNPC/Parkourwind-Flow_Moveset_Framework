@@ -13,6 +13,7 @@ local AnimPriority = require('scripts/Flow/core/anim_priority')
 local Settings = require('scripts/Flow/settings')
 local PRIORITY_FLOW       = AnimPriority.FLOW
 local PRIORITY_FLOW_MAJOR = AnimPriority.FLOW_MAJOR
+local PRIORITY_SCRIPTED   = AnimPriority.FLOW_SCRIPTED
 
 local GROUPS = {
     Vault     = { group = { "pwvault1", "pwvault2", "pwvault3" }, speed = .8,
@@ -72,38 +73,12 @@ local GROUPS = {
         stopKey = "stop",
     },
 
-    -- brace is pwwalljump1 (0.333s); the launch clip is picked by direction.
-    WallJump  = {
-        variants = { brace = "pwwalljump1", up = "pwboostup",
-                     left = "pwboostbkl", right = "pwboostbkr" },
-        speed = 1,
-        priority = PRIORITY_FLOW_MAJOR,
-        blendMask = animation.BLEND_MASK.All,
-        startKey = "start",
-        stopKey = "stop",
-    },
-
-    -- dbsdive in three passes: the leaping lead-in, the tumble loop, and the
-    -- resolve out of it. Times in states/../core/air_pose.lua.
-    Dive      = {
-        variants = { lead = "dbsdive", loop = "dbsdive", land = "dbsdive" },
-        variantStartKey = { loop = "loop start", land = "loop stop" },
-        variantStopKey = { lead = "loop start", loop = "loop stop" },
-        speed = 1,
-        priority = PRIORITY_FLOW_MAJOR,
-        blendMask = animation.BLEND_MASK.All,
-        startKey = "start",
-        stopKey = "stop",
-    },
-
-    -- skydive1's windup runs to the author's own `skydive: release` key, at
-    -- whatever speed makes that take the configured number of seconds.
+    -- skydive1 is the windup, `skydive` the looping idle: two groups since
+    -- v0.82, so the hand-over is a group change and not a key change.
     Skydive   = {
-        variants = { entry = "skydive1", loop = "skydive1",
+        variants = { entry = "skydive1", loop = "skydive",
                      left = "skydivel", right = "skydiver",
                      forward = "skydivefwd" },
-        variantStartKey = { loop = "loop start" },
-        variantStopKey = { entry = "loop stop", loop = "loop stop" },
         variantSpeed = { entry = function() return Anim.skydiveWindupSpeed() end },
         speed = 1,
         priority = PRIORITY_FLOW_MAJOR,
@@ -120,8 +95,12 @@ local GROUPS = {
         stopKey = "stop",
     },
 
+    -- "stumble" after a botched manoeuvre; "knockdown" after a skydive, at
+    -- Scripted priority so it plays over whatever the engine is doing.
     Stumble   = {
-        group = "dbsfall", speed = 1,
+        variants = { stumble = "dbsfall", knockdown = { "pwfalling", "dbsfall" } },
+        variantPriority = { knockdown = PRIORITY_SCRIPTED },
+        speed = 1,
         priority = PRIORITY_FLOW_MAJOR,
         blendMask = animation.BLEND_MASK.All,
         startKey = "start",
@@ -131,8 +110,7 @@ local GROUPS = {
 
 local LOOPING_STATES = { LedgeHang = true, Ladder = true }
 local ONE_SHOT_STATES = { Vault = true, Mantle = true, Roll = true,
-                          Shimmy = true, WallBoost = true, WallJump = true,
-                          Stumble = true }
+                          Shimmy = true, WallBoost = true, Stumble = true }
 
 local currentGroup = nil
 
@@ -162,7 +140,7 @@ function Anim.skydiveWindupSpeed()
     local windup = math.max(0.5, Settings.skydiveWindup())
     local span = SKYDIVE_RELEASE_SPAN
     if animation.getTextKeyTime then
-        local release = animation.getTextKeyTime(self, "skydive: release")
+        local release = animation.getTextKeyTime(self, "skydive1: release")
         local from = animation.getTextKeyTime(self, "skydive1: start")
         if release and from and release > from then span = release - from end
     end
@@ -346,10 +324,15 @@ local function playGroup(stateName, looping)
     end
     if type(speed) == "function" then speed = speed() end
 
+    local priority = entry.priority
+    if variant and entry.variantPriority and entry.variantPriority[variant] then
+        priority = entry.variantPriority[variant]
+    end
+
     animation.playBlended(self, group, {
         startKey = startKey,
         stopKey = stopKey,
-        priority = entry.priority,
+        priority = priority,
         blendMask = entry.blendMask,
         speed = speed,
         loops = looping and -1 or 0,
@@ -372,7 +355,7 @@ end
 
 -- Re-resolves the current state's group, picking up a new variant. `force` is
 -- for a variant that resolves to the group already playing, which playGroup
--- otherwise skips - Skydive's windup and loop are both skydive1.
+-- otherwise skips.
 function Anim.replay(force)
     if not lastRequest then return end
     if force then currentGroup = nil end

@@ -75,12 +75,32 @@ def braced(src, i):
     raise ValueError('unbalanced brace')
 
 
+def keytable(entry, name):
+    """{variant: key} from a variantStartKey / variantStopKey table."""
+    m = re.search(re.escape(name) + r'\s*=\s*\{', entry)
+    if not m:
+        return {}
+    inner, _ = braced(entry, m.end() - 1)
+    return {k: v for k, v in re.findall(r'(\w+)\s*=\s*"([^"]*)"', inner)}
+
+
+def scalar(entry, name):
+    m = re.search(re.escape(name) + r'\s*=\s*"([^"]*)"', entry)
+    return m.group(1) if m else None
+
+
 def slots(root):
-    """[(label, [interchangeable group names])] from playerAnim.lua's GROUPS.
+    """[(label, [group names], startKey, stopKey)] from playerAnim's GROUPS.
 
     A `variants` direction is its OWN slot: up, down and idle are different
     clips, not alternatives, so a missing pwladderup must not be excused by a
     present pwladderdwn. Only a list under `group` is interchangeable.
+
+    The KEYS each slot names are carried too. A group that exists while the
+    start key it is played with does not is silent, exactly like a missing
+    group - and that is not hypothetical: dbsdive lost its `loop start` and
+    `loop stop` keys in a re-cut, which left Dive's loop and land passes
+    unplayable while this check still reported them fine.
     """
     found_at = glob.glob(os.path.join(root, '**', 'playerAnim.lua'), recursive=True)
     if not found_at:
@@ -93,18 +113,24 @@ def slots(root):
         if state in ('variants',):
             continue
         entry, _ = braced(body, m.end() - 1)
+        sk = scalar(entry, 'startKey') or 'start'
+        tk = scalar(entry, 'stopKey') or 'stop'
         vm = re.search(r'variants\s*=\s*\{', entry)
         if vm:
+            vstart = keytable(entry, 'variantStartKey')
+            vstop = keytable(entry, 'variantStopKey')
             inner, _ = braced(entry, vm.end() - 1)
             for d in re.finditer(r'(\w+)\s*=\s*(\{[^}]*\}|"[A-Za-z][A-Za-z0-9_]*")', inner):
                 names = QUOTED.findall(d.group(2))
                 if names:
-                    found.append(('%s/%s' % (state, d.group(1)), names))
+                    v = d.group(1)
+                    found.append(('%s/%s' % (state, v), names,
+                                  vstart.get(v, sk), vstop.get(v, tk)))
         else:
             gm = re.search(r'group\s*=\s*(\{[^}]*\}|"[A-Za-z][A-Za-z0-9_]*")', entry)
             names = QUOTED.findall(gm.group(1)) if gm else []
             if names:
-                found.append((state, names))
+                found.append((state, names, sk, tk))
     return found
 
 
@@ -140,22 +166,23 @@ def main(argv):
     print('slots playerAnim can play: %d\n' % len(found))
 
     bad = 0
-    for label, alts in found:
+    for label, alts, sk, tk in found:
         broken = []
         for d in names:
             ok = [g for g in alts
-                  if 'start' in sets[d].get(g, {}) and 'stop' in sets[d].get(g, {})]
+                  if sk in sets[d].get(g, {}) and tk in sets[d].get(g, {})]
             if not ok:
                 broken.append(d)
+        keys = '' if (sk, tk) == ('start', 'stop') else '  [%s..%s]' % (sk, tk)
         if broken:
             bad += 1
-            print('  UNPLAYABLE %-16s %s  -> no clip in: %s'
-                  % (label, '/'.join(alts), ', '.join(broken)))
+            print('  UNPLAYABLE %-16s %s%s  -> no clip in: %s'
+                  % (label, '/'.join(alts), keys, ', '.join(broken)))
         else:
-            print('  ok         %-16s %s' % (label, '/'.join(alts)))
+            print('  ok         %-16s %s%s' % (label, '/'.join(alts), keys))
 
     print('\nclip lengths (stop - start), per set:')
-    every = sorted({g for alts in (a for _, a in found) for g in alts})
+    every = sorted({g for slot in found for g in slot[1]})
     print('  %-16s %s' % ('group', ''.join('%-14s' % d[:13] for d in names)))
     for g in every:
         cells = []
@@ -163,8 +190,8 @@ def main(argv):
             k = sets[d].get(g, {})
             if 'start' in k and 'stop' in k:
                 cells.append('%-14s' % ('%.3f' % (k['stop'] - k['start'])))
-            elif 'start' in k:
-                cells.append('%-14s' % 'NO-STOP')
+            elif k:
+                cells.append('%-14s' % ('keys: ' + ','.join(sorted(k))[:7]))
             else:
                 cells.append('%-14s' % '-')
         print('  %-16s %s' % (g, ''.join(cells)))

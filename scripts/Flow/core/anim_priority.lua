@@ -37,6 +37,19 @@ return {
     -- contains none of those, so introducing Weapon here would have made a POV
     -- switch silently do nothing until a looping LedgeHang or Ladder pose ended.
     -- Torch keeps upperBodyReady() exactly as it was.
+    -- Over everything, including the engine's own knockdown. Uniform is safe
+    -- here where it is not for FLOW_MAJOR: the engine's constant uniform
+    -- tuples are shield (Block), torch (Torch) and hit (Hit), and it never
+    -- plays at uniform Scripted - only mwscript PlayGroup and other mods'
+    -- scripted animations do, and losing a one-second knockdown pose to one of
+    -- those is acceptable. Used only by Stumble's "knockdown" variant.
+    FLOW_SCRIPTED = {
+        [BG.LowerBody] = P.Scripted,
+        [BG.Torso] = P.Scripted,
+        [BG.LeftArm] = P.Scripted,
+        [BG.RightArm] = P.Scripted,
+    },
+
     FLOW_MAJOR = {
         [BG.LowerBody] = P.Torch,
         [BG.Torso] = P.Block,

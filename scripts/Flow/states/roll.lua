@@ -5,7 +5,6 @@ local types = require('openmw.types')
 local mwSelf = require('openmw.self')
 local I = require('openmw.interfaces')
 local Settings = require('scripts/Flow/settings')
-local AirPose = require('scripts/Flow/core/air_pose')
 
 local RollState = BaseState.new("Roll")
 
@@ -16,9 +15,6 @@ local REFUND_MAX = 0.75
 local REFUND_SKILL_CAP = 100.0
 
 local DAMAGE_WATCH_WINDOW = 0.25
-
--- Jump inside this much of the end carries into a Dive.
-local DIVE_WINDOW = 0.30
 
 local pendingHealthBefore = nil
 
@@ -37,7 +33,6 @@ local INTERRUPT_GRACE = 0.1
 local timeInState = 0
 local healthBefore = nil
 local refundApplied = false
-local diveArmed = false
 
 local function refundFraction()
     local acro = types.NPC.stats.skills.acrobatics(mwSelf).modified or 0
@@ -48,7 +43,6 @@ end
 function RollState:enter(syncData)
     timeInState = 0
     refundApplied = false
-    diveArmed = false
 
     healthBefore = pendingHealthBefore
     pendingHealthBefore = nil
@@ -69,25 +63,10 @@ function RollState:update(dt, syncData, inputData)
         return "Idle"
     end
 
-    if not diveArmed and inputData.jumpPressed
-       and timeInState >= ROLL_DURATION - DIVE_WINDOW then
-        diveArmed = true
-    end
-
     mwSelf.controls.movement = FORWARD_DRIVE
     mwSelf.controls.sideMovement = 0
     mwSelf.controls.run = true
-
-    -- Jump is suppressed for the whole roll but the dive: there the press goes
-    -- straight to the engine, so the dive is a native jump with no teleport.
-    mwSelf.controls.jump = diveArmed
-
-    -- Hand over the moment the feet leave the ground, so the pose starts with
-    -- the jump rather than whenever the clip happens to run out.
-    if diveArmed and not syncData.isGrounded then
-        AirPose.requestDive()
-        return "Airborne"
-    end
+    mwSelf.controls.jump = false
 
     if not refundApplied and healthBefore and timeInState <= DAMAGE_WATCH_WINDOW then
         local hp = types.Actor.stats.dynamic.health(mwSelf)
@@ -104,10 +83,6 @@ function RollState:update(dt, syncData, inputData)
     end
 
     if timeInState >= ROLL_DURATION then
-        if diveArmed then
-            AirPose.requestDive()
-            return "Airborne"
-        end
         return "Idle"
     end
 

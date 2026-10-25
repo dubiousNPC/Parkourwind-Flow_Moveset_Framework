@@ -82,12 +82,6 @@ I.Settings.registerGroup({
             default = true, renderer = "checkbox"
         },
         {
-            key = "stateWallJump",
-            name = "Wall Jump",
-            description = "Jump into a wall, then press jump again straight away for a boosted second jump upward. Turning this off also skips the wall-contact probe, which is only cast on the second jump press and never per frame.",
-            default = true, renderer = "checkbox"
-        },
-        {
             key = "stateRoll",
             name = "Landing Roll",
             description = "Tapping jump in mid-air near the ground to roll on landing, reducing fall damage. Turning this off also skips the ground-height probe that arming the roll would cast.",
@@ -97,12 +91,6 @@ I.Settings.registerGroup({
             key = "stateLadder",
             name = "Ladder Climb",
             description = "Climbing statics recognised as ladders. Turning this off also skips the forward probe that looks for them.",
-            default = true, renderer = "checkbox"
-        },
-        {
-            key = "stateDive",
-            name = "Dive",
-            description = "Pressing jump as a landing roll finishes carries the momentum into a native jump with the dive animation over it. Cosmetic: no teleport. Requires Landing Roll.",
             default = true, renderer = "checkbox"
         },
         {
@@ -201,10 +189,8 @@ local STATE_KEYS = {
     LedgeHang = "stateLedgeHang",
     Shimmy    = "stateShimmy",
     WallBoost = "stateWallBoost",
-    WallJump  = "stateWallJump",
     Roll      = "stateRoll",
     Ladder    = "stateLadder",
-    Dive      = "stateDive",
     Skydive   = "stateSkydive",
 }
 
