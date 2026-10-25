@@ -140,7 +140,7 @@ function Anim.skydiveWindupSpeed()
     local windup = math.max(0.5, Settings.skydiveWindup())
     local span = SKYDIVE_RELEASE_SPAN
     if animation.getTextKeyTime then
-        local release = animation.getTextKeyTime(self, "skydive1: release")
+        local release = animation.getTextKeyTime(self, "skydive1: stop")
         local from = animation.getTextKeyTime(self, "skydive1: start")
         if release and from and release > from then span = release - from end
     end
