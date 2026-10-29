@@ -88,7 +88,7 @@ local GROUPS = {
     },
 
     Falling   = {
-        group = "pwfalling", speed = 1,
+        group = "pwfall1", speed = 1,
         priority = PRIORITY_FLOW,
         blendMask = animation.BLEND_MASK.All,
         startKey = "start",
@@ -98,7 +98,7 @@ local GROUPS = {
     -- "stumble" after a botched manoeuvre; "knockdown" after a skydive, at
     -- Scripted priority so it plays over whatever the engine is doing.
     Stumble   = {
-        variants = { stumble = "dbsfall", knockdown = { "pwfalling", "dbsfall" } },
+        variants = { stumble = "pwfall1", knockdown = { "pwfall1", "pwfall3", "pwfall4" } },
         variantPriority = { knockdown = PRIORITY_SCRIPTED },
         speed = 1,
         priority = PRIORITY_FLOW_MAJOR,
