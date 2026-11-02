@@ -1,7 +1,6 @@
 ---@omw-context player
--- FLOW entry point. Registers states, drives the pipeline, owns the throttle.
+-- FLOW entry point. Registers states and drives the pipeline.
 local self = require('openmw.self')
-local I = require('openmw.interfaces')
 
 local EngineSync = require('scripts/Flow/core/engine_sync')
 local StateManager = require('scripts/Flow/core/state_manager')
@@ -42,30 +41,13 @@ local DEBUG_HUD_INTERVAL = 0.1
 local debugTick = H3.every(DEBUG_HUD_INTERVAL)
 local debugWasEnabled = false
 
-local IDLE_THROTTLE_INTERVAL = 0.15
-local idleTick = H3.every(IDLE_THROTTLE_INTERVAL)
-
-local OVERRIDE_STATES = {
-    Vault = true, Mantle = true, LedgeHang = true,
-    Shimmy = true, WallBoost = true, Ladder = true,
-    Roll = true, Stumble = true,
-}
-
-local overrideHeld = false
 local wasActive = true
 
-local function releaseOverrides()
-    I.Controls.overrideMovementControls(false)
-    I.Controls.overrideCombatControls(false)
-end
-
+-- Leaving the active state releases whatever its traits held (overrides,
+-- Levitate), so switching FLOW off never strands either.
 local function standDown()
     if StateManager.getActiveStateName() ~= "Idle" then
         StateManager.setState("Idle")
-    end
-    if overrideHeld then
-        releaseOverrides()
-        overrideHeld = false
     end
 end
 
@@ -87,6 +69,31 @@ local function onLoad(data)
     Owned.undo(data and data.owned)
 end
 
+-- Sensors run on demand: only for a state that reads them, and only while jump
+-- is held, because every consumer acts on held jump. The forward scan alone is
+-- 3 rays a frame with nothing ahead and up to 7 plus a navmesh query facing a
+-- wall.
+--
+-- Debug mode runs them regardless, so the HUD stays live - which means DEBUG
+-- MODE CHANGES DETECTION, not just display. Anything reading Sensor.data
+-- outside a jump-held frame works with the HUD on and sees a reset table in
+-- play. tools/check_sensors.py holds the line: a read outside canEnter needs
+-- the trait.
+local function runSensors(dt, state, intents, debugOn)
+    local want = state and state.traits.sensors
+    local asked = want and (intents.jump or debugOn)
+    if asked and want.forward then
+        Sensor.update(dt, intents, EngineSync.data)
+    else
+        Sensor.reset()
+    end
+    if asked and want.ledge then
+        SensorExt.updateLedgeHang(dt, intents, EngineSync.data)
+    else
+        SensorExt.reset()
+    end
+end
+
 local function onUpdate(dt)
     if StateManager.getActiveStateName() == "None" then
         EngineSync.init()
@@ -104,27 +111,13 @@ local function onUpdate(dt)
     end
     wasActive = true
 
+    local debugOn = Settings.debugMode()
+
     EngineSync.update(dt)
     InputManager.update()
+    runSensors(dt, StateManager.getActiveState(), InputManager.intents, debugOn)
+    StateManager.update(dt, EngineSync.data, InputManager.intents)
 
-    local activeName = StateManager.getActiveStateName()
-    local isIdle = activeName == "Idle" and not self.controls.run
-    local justActed = InputManager.intents.jumpPressed
-    if not isIdle or idleTick() or justActed then
-        Sensor.update(dt, InputManager.intents, EngineSync.data)
-        SensorExt.updateLedgeHang(dt, InputManager.intents, EngineSync.data)
-        StateManager.update(dt, EngineSync.data, InputManager.intents)
-    end
-
-    -- Same frame as the exit, so no other script can take the flag in between.
-    if OVERRIDE_STATES[StateManager.getActiveStateName()] then
-        overrideHeld = true
-    elseif overrideHeld then
-        releaseOverrides()
-        overrideHeld = false
-    end
-
-    local debugOn = Settings.debugMode()
     if debugOn then
         if debugTick() then
             DebugHUD.update(

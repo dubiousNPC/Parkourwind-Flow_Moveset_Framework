@@ -1,16 +1,22 @@
 ---@omw-context player
 -- Ladder climb. Detects ladder statics by recordId.
+--
+-- The climb itself is a backend move (FLOW_Climb_Start / _Cancel), sent once
+-- per direction change rather than one SnapTo event per frame. Every frame
+-- while moving, the state re-checks what the backend cannot: that a ladder is
+-- still in front, and, going up, that there is room overhead.
 local core = require('openmw.core')
 local mwSelf = require('openmw.self')
 local util = require('openmw.util')
 local nearby = require('openmw.nearby')
-local I = require('openmw.interfaces')
 local BaseState = require('scripts/Flow/states/base_state')
 local Anim = require('scripts/Flow/playerAnim')
-local Settings = require('scripts/Flow/settings')
-local Owned = require('scripts/Flow/core/owned')
+local Body = require('scripts/Flow/core/body')
+local Geom = require('scripts/Flow/core/geom')
 
-local LadderState = BaseState.new("Ladder")
+local LadderState = BaseState.new("Ladder", {
+    overrides = "all", suspend = true, anim = "loop",
+})
 
 local CLIMB_SPEED = 110.0      -- units/sec, up or down
 local DETECT_REACH = 95.0      -- how far ahead to look for a ladder
@@ -18,9 +24,9 @@ local DETECT_HEIGHT = 70.0     -- cast from roughly chest height
 local WALL_OFFSET = 28.0       -- how far to sit off the ladder face
 local TOP_CLEARANCE = 40.0     -- headroom needed before stepping off the top
 local EXIT_PUSH = 45.0         -- how far forward to place the player on exit
-
--- Levitate magnitude used to suspend gravity, matching ledge_hang.lua.
-local LEVITATE_MAG = 200
+local GRIP_REACH = WALL_OFFSET + 30.0   -- re-probe reach while on the ladder
+local HEAD_MARGIN = 12.0       -- crown clearance kept while climbing
+local PROBE_INTERVAL = 0.1     -- entry probe rate while walking forward
 
 local LADDER_IDS = {
     "ladder",
@@ -43,138 +49,109 @@ local function looksLikeLadder(obj)
     return false
 end
 
-function LadderState.probe()
-    if not Settings.stateEnabled("Ladder") then return nil end
+local nextProbe = 0
 
-    local pos = mwSelf.position
-    local yaw = mwSelf.rotation:getYaw()
-    local forward = util.transform.rotateZ(yaw):apply(util.vector3(0, 1, 0))
+-- Offered by Idle every frame forward is held; probes at most PROBE_INTERVAL.
+function LadderState:canEnter()
+    local now = core.getRealTime()
+    if now < nextProbe then return nil end
+    nextProbe = now + PROBE_INTERVAL
 
-    local origin = pos + util.vector3(0, 0, DETECT_HEIGHT)
-    local res = nearby.castRay(origin, origin + forward * DETECT_REACH, RAY_OPTS)
-
-    if Settings.debugMode() and res.hit and res.hitObject then
-        print("[FLOW][ladder] facing: " .. tostring(res.hitObject.recordId))
-    end
-
-    if res.hit and looksLikeLadder(res.hitObject) then
-        return res.hitPos, res.hitNormal
-    end
-    return nil
+    local origin = mwSelf.position + util.vector3(0, 0, DETECT_HEIGHT)
+    local res = nearby.castRay(origin, origin + Geom.forward(mwSelf) * DETECT_REACH, RAY_OPTS)
+    if not (res.hit and looksLikeLadder(res.hitObject)) then return nil end
+    local flat = Geom.flat(res.hitNormal)
+    if not flat then return nil end
+    return { pos = res.hitPos, flat = flat }
 end
 
-local pendingPos = nil
-local pendingNormal = nil
+local flat = nil      -- unit XY normal out of the ladder face
+local climbDir = 0    -- what the backend is currently doing
+local lastInput = 0
 
-function LadderState.setLadder(hitPos, hitNormal)
-    pendingPos = hitPos
-    pendingNormal = hitNormal
-end
-
-local wallNormal = nil
-local levitateApplied = false
-local lastDir = 0          -- -1 down, 0 idle, +1 up
-
-local function applyLevitate(enable)
-    if enable == levitateApplied then return end
-    Owned.effect(core.magic.EFFECT_TYPE.Levitate, enable and LEVITATE_MAG or -LEVITATE_MAG)
-    levitateApplied = enable
+local function setClimb(dir)
+    if dir == climbDir then return end
+    climbDir = dir
+    if dir == 0 then
+        core.sendGlobalEvent('FLOW_Climb_Cancel', { actor = mwSelf })
+    else
+        core.sendGlobalEvent('FLOW_Climb_Start', { actor = mwSelf, speed = CLIMB_SPEED * dir })
+    end
 end
 
 local function setClipFor(dir)
     if dir > 0 then Anim.setVariant("up")
     elseif dir < 0 then Anim.setVariant("down")
     else Anim.setVariant("idle") end
+    Anim.replay()
 end
 
-function LadderState:enter(syncData)
-    self.abort = false
-
-    wallNormal = pendingNormal
-    lastDir = 0
-    pendingNormal = nil
-
-    applyLevitate(true)
-    I.Controls.overrideMovementControls(true)
-    I.Controls.overrideCombatControls(true)
-
-    if pendingPos and wallNormal then
-        local flat = util.vector3(wallNormal.x, wallNormal.y, 0)
-        if flat:length() > 0.01 then
-            flat = flat:normalize()
-            local snapPos = util.vector3(pendingPos.x, pendingPos.y, mwSelf.position.z)
-                            + flat * WALL_OFFSET
-            local faceYaw = math.atan2(flat.x, flat.y) + math.pi
-            core.sendGlobalEvent('FLOW_SnapTo', {
-                actor = mwSelf,
-                position = snapPos,
-                rotation = util.transform.rotateZ(faceYaw),
-            })
-        end
-    end
-    pendingPos = nil
+local function ladderAhead(pos)
+    local origin = pos + util.vector3(0, 0, DETECT_HEIGHT)
+    local res = nearby.castRay(origin, origin - flat * GRIP_REACH, RAY_OPTS)
+    return res.hit and looksLikeLadder(res.hitObject)
 end
 
-function LadderState:exit()
-    applyLevitate(false)
-    I.Controls.overrideMovementControls(false)
-    I.Controls.overrideCombatControls(false)
-    wallNormal = nil
-    lastDir = 0
-end
-
-function LadderState:update(dt, syncData, inputData)
-    if self.abort then return "Idle" end
-    -- Drop off deliberately.
-    if inputData.crouch then
-        return "Airborne"
-    end
-
-    local dir = 0
-    if inputData.moveVector.y > 0.1 then dir = 1
-    elseif inputData.moveVector.y < -0.1 then dir = -1 end
-
-    if dir ~= lastDir then
-        lastDir = dir
-        setClipFor(dir)
-        Anim.replay()
-    end
-
-    if dir == 0 then return nil end
-
-    local pos = mwSelf.position
-    local nextPos = pos + util.vector3(0, 0, CLIMB_SPEED * dir * dt)
-
-    if dir > 0 then
-        local flat = wallNormal and util.vector3(wallNormal.x, wallNormal.y, 0)
-        if flat and flat:length() > 0.01 then
-            flat = flat:normalize()
-            local headOrigin = pos + util.vector3(0, 0, DETECT_HEIGHT + TOP_CLEARANCE)
-            local ahead = nearby.castRay(headOrigin, headOrigin - flat * EXIT_PUSH, RAY_OPTS)
-            if not ahead.hit then
-                -- Nothing blocking above the lip: step off onto the top.
-                core.sendGlobalEvent('FLOW_SnapTo', {
-                    actor = mwSelf,
-                    position = pos + util.vector3(0, 0, TOP_CLEARANCE) - flat * EXIT_PUSH,
-                    rotation = mwSelf.rotation,
-                })
-                return "Idle"
-            end
-        end
-    else
-        -- Reached the bottom.
-        if syncData.isGrounded then
-            return "Idle"
-        end
-    end
+function LadderState:enter(plan)
+    flat = plan.flat
+    climbDir = 0
+    lastInput = 0
+    -- Without this the first clip came from pairs() order over the variants.
+    Anim.setVariant("idle")
 
     core.sendGlobalEvent('FLOW_SnapTo', {
         actor = mwSelf,
-        position = nextPos,
-        rotation = mwSelf.rotation,
+        position = util.vector3(plan.pos.x, plan.pos.y, mwSelf.position.z) + flat * WALL_OFFSET,
+        rotation = util.transform.rotateZ(math.atan2(flat.x, flat.y) + math.pi),
     })
+end
 
-    return nil
+function LadderState:exit()
+    setClimb(0)
+    flat = nil
+end
+
+function LadderState:update(dt, syncData, inputData)
+    -- Drop off deliberately.
+    if inputData.crouch then return "Airborne" end
+
+    local input = 0
+    if inputData.moveVector.y > 0.1 then input = 1
+    elseif inputData.moveVector.y < -0.1 then input = -1 end
+
+    if input ~= lastInput then
+        lastInput = input
+        setClipFor(input)
+    end
+
+    local pos = mwSelf.position
+    local dir = input
+
+    if dir > 0 then
+        local headOrigin = pos + util.vector3(0, 0, DETECT_HEIGHT + TOP_CLEARANCE)
+        if not nearby.castRay(headOrigin, headOrigin - flat * EXIT_PUSH, RAY_OPTS).hit then
+            -- Nothing above the lip: step off onto the top.
+            core.sendGlobalEvent('FLOW_SnapTo', {
+                actor = mwSelf,
+                position = pos + util.vector3(0, 0, TOP_CLEARANCE) - flat * EXIT_PUSH,
+                rotation = mwSelf.rotation,
+            })
+            return "Idle"
+        end
+        -- A wall that carries on past the ladder is not climbable, and a
+        -- teleport climb would go straight through a ceiling.
+        local crown = pos + util.vector3(0, 0, Body.height())
+        if not ladderAhead(pos)
+           or nearby.castRay(crown, crown + util.vector3(0, 0, HEAD_MARGIN + CLIMB_SPEED * dt), RAY_OPTS).hit then
+            dir = 0
+        end
+    elseif dir < 0 then
+        if syncData.isGrounded then return "Idle" end
+        -- The ladder ends above the floor: let go.
+        if not ladderAhead(pos) then return "Airborne" end
+    end
+
+    setClimb(dir)
 end
 
 return LadderState

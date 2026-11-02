@@ -7,7 +7,7 @@ local I = require('openmw.interfaces')
 
 local InputManager = {
     intents = {
-        moveVector = util.vector2(0, 0),
+        moveVector = nil,
         jump = false,
         crouch = false,
         jumpPressed = false
@@ -15,6 +15,14 @@ local InputManager = {
 }
 
 local wasJumpHeld = false
+
+-- The nine possible move vectors, built once.
+local MOVE = {}
+for x = -1, 1 do
+    MOVE[x] = {}
+    for y = -1, 1 do MOVE[x][y] = util.vector2(x, y) end
+end
+InputManager.intents.moveVector = MOVE[0][0]
 
 function InputManager.update()
     if I.UI.getMode() ~= nil then
@@ -27,7 +35,7 @@ function InputManager.update()
     if input.isActionPressed(input.ACTION.MoveLeft) then mx = mx - 1 end
     if input.isActionPressed(input.ACTION.MoveForward) then my = my + 1 end
     if input.isActionPressed(input.ACTION.MoveBackward) then my = my - 1 end
-    InputManager.intents.moveVector = util.vector2(mx, my)
+    InputManager.intents.moveVector = MOVE[mx][my]
 
     local jumpHeld = input.isActionPressed(input.ACTION.Jump)
 
@@ -40,7 +48,7 @@ function InputManager.update()
 end
 
 function InputManager.reset()
-    InputManager.intents.moveVector = util.vector2(0, 0)
+    InputManager.intents.moveVector = MOVE[0][0]
     InputManager.intents.jump = false
     InputManager.intents.crouch = false
     InputManager.intents.jumpPressed = false

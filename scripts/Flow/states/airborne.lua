@@ -3,30 +3,24 @@
 local BaseState = require('scripts/Flow/states/base_state')
 local core = require('openmw.core')
 local I = require('openmw.interfaces')
-local camera = require('openmw.camera')
 local input = require('openmw.input')
 local async = require('openmw.async')
-local types = require('openmw.types')
 local mwSelf = require('openmw.self')
 local nearby = require('openmw.nearby')
 local util = require('openmw.util')
-local Sensor = require('scripts/Flow/core/sensor')
-local SensorExt = require('scripts/Flow/core/optional/sensor_ext')
 local RollState = require('scripts/Flow/states/roll')
 local InputManager = require('scripts/Flow/core/input')
-local VaultState = require('scripts/Flow/states/vault')
-local MantleState = require('scripts/Flow/states/mantle')
 local Settings = require('scripts/Flow/settings')
-local Owned = require('scripts/Flow/core/owned')
 local AirPose = require('scripts/Flow/core/air_pose')
-local StumbleState = require('scripts/Flow/states/stumble')
 local SkillCheck = require('scripts/Flow/core/skill_check')
+local StateManager = require('scripts/Flow/core/state_manager')
 
-local AirborneState = BaseState.new("Airborne")
+local AirborneState = BaseState.new("Airborne", { sensors = { forward = true, ledge = true } })
 
-local AGILITY_BONUS = 70
-
-local LEDGE_AIM_DROP = 34   -- how far below level still counts as looking up
+-- PRIORITY LADDER. Lowest available action wins; each target's canEnter is
+-- the gate. Nothing may go above LedgeHang without re-reading README's
+-- Action priority.
+local RUNGS = { "Vault", "Mantle", "LedgeHang" }
 
 local FORWARD_DEADZONE = 0.1
 
@@ -39,28 +33,8 @@ local SKYDIVE_CLEARANCE = 1200.0
 local armed = false
 local timeAirborne = 0
 local isActive = false
-local agilityApplied = false
 local skydiveTried = false
-
-local function applyAgility(enable)
-    if enable == agilityApplied then return end
-    local amount = enable and AGILITY_BONUS or -AGILITY_BONUS
-    Owned.attribute('agility', amount)
-    Owned.effect(core.magic.EFFECT_TYPE.FortifyAttribute, amount, 'agility')
-    agilityApplied = enable
-end
-
--- Camera aimed at or above the lip. SharedRay is camera-aimed, so no pitch sign.
-local function lookingAtLedge(targetPos)
-    local get = I.SharedRay and (I.SharedRay.getUnclipped or I.SharedRay.get)
-    if not get then return true end
-    local ray = get()
-    if not (ray and ray.hit and ray.hitPos) then return true end
-    -- Look DIRECTION, camera to what the camera hit: sign-free, and it does not
-    -- care how far away the hit is. Comparing the hit's absolute Z to the lip
-    -- rejected any shot that landed on the wall below it, which is most of them.
-    return (ray.hitPos.z - camera.getPosition().z) > -LEDGE_AIM_DROP
-end
+local rollHandoff = false   -- landing into Roll: the buff stays on, Roll removes it
 
 local DOWN_RAY_OPTS = {
     ignore = mwSelf,
@@ -87,7 +61,7 @@ input.registerTriggerHandler("Jump", async:callback(function()
     if InputManager.intents.moveVector.y <= FORWARD_DEADZONE then return end
 
     armed = true
-    applyAgility(true)
+    RollState.setBuff(true)
 end))
 
 local landedSignal = false
@@ -111,45 +85,39 @@ function AirborneState.getRollDebug()
         InputManager.intents.moveVector.y, AirPose.debugString())
 end
 
-local healthBeforeLanding = nil
-
-function AirborneState:enter(syncData)
+function AirborneState:enter()
     isActive = true
-    healthBeforeLanding = types.Actor.stats.dynamic.health(mwSelf).current
     armed = false
     timeAirborne = 0
     landedSignal = false
     skydiveTried = false
+    rollHandoff = false
 end
 
 function AirborneState:exit()
     isActive = false
-    applyAgility(false)
+    if not rollHandoff then RollState.setBuff(false) end
+    rollHandoff = false
     AirPose.clear()
 end
 
 function AirborneState:update(dt, syncData, inputData)
     timeAirborne = timeAirborne + dt
 
-    -- PRIORITY LADDER. Lowest available action wins. See README.
-    if inputData.jump then
-        if Sensor.data.interaction == "Vault"
-           and not VaultState.isBlocked(Sensor.data.targetPos) then
-            return "Vault"
-        end
+    -- Still here after handing off: Roll refused (disabled mid-fall).
+    if rollHandoff then
+        rollHandoff = false
+        RollState.setBuff(false)
+    end
 
-        if Sensor.data.interaction == "Mantle"
-           and not MantleState.isBlocked(Sensor.data.targetPos) then
-            return "Mantle"
-        end
+    if inputData.jump and StateManager.tryAny(RUNGS) then return end
 
-        if SensorExt.data.interaction == "LedgeHang" and SensorExt.data.targetPos
-           and lookingAtLedge(SensorExt.data.targetPos) then
-            local handsZ = mwSelf.position.z + SensorExt.grabFloorHeight()
-            if SensorExt.data.targetPos.z > handsZ then
-                return "LedgeHang"
-            end
-        end
+    -- Water owes nothing: no skydive, and no stumble waiting for the shore.
+    -- The only water test per frame; AirPose.update relies on it.
+    if AirPose.inWater() then
+        SkillCheck.clearBotch()
+        skydiveTried = true
+        AirPose.clear()
     end
 
     -- Below the ladder, and a pose rather than a state, so everything above
@@ -169,14 +137,9 @@ function AirborneState:update(dt, syncData, inputData)
     AirPose.update(dt, syncData, inputData)
 
     local touchedDown = syncData.isGrounded or (landedSignal and armed)
-
-    if not touchedDown then
-        healthBeforeLanding = types.Actor.stats.dynamic.health(mwSelf).current
-        return nil
-    end
+    if not touchedDown then return nil end
 
     landedSignal = false
-    applyAgility(false)
 
     -- A released skydive lands as a knockdown, ahead of everything else: it is
     -- the end of the fall, not a manoeuvre to recover from.
@@ -185,22 +148,22 @@ function AirborneState:update(dt, syncData, inputData)
 
     if skydiveLanding then
         armed = false
+        RollState.setBuff(false)
         SkillCheck.clearBotch()
-        StumbleState.request("knockdown")
-        return "Stumble"
+        return "Stumble", { kind = "knockdown" }
     end
 
     -- A botched manoeuvre is paid for here, ahead of the roll it would have
     -- earned: the stumble IS the failure, so it cannot be rolled out of.
     if SkillCheck.botched() then
         armed = false
-        StumbleState.request("stumble")
-        return "Stumble"
+        RollState.setBuff(false)
+        return "Stumble", { kind = "stumble" }
     end
 
     if armed then
         armed = false
-        RollState.setLandingData(healthBeforeLanding)
+        rollHandoff = true
         return "Roll"
     end
 

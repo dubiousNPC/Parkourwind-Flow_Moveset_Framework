@@ -4,22 +4,25 @@
 -- These are NOT states. Airborne stays active and keeps resolving the priority
 -- ladder, so a skydive can still be interrupted by a vault, a mantle or a
 -- ledge. Nothing here moves the actor: no teleport, no lerp.
---
--- Dive lived here until v0.82; see states/optional/dive_pose.lua.
 local core = require('openmw.core')
 local mwSelf = require('openmw.self')
+local types = require('openmw.types')
 local Anim = require('scripts/Flow/playerAnim')
 local Owned = require('scripts/Flow/core/owned')
 local Settings = require('scripts/Flow/settings')
 
 local AirPose = {}
 
+-- Water entry ends a skydive. No ray: the cell carries a flat water level and
+-- position.z is the feet, so the compare is free and fires at the surface,
+-- before isSwimming turns true.
 local SKYDIVE_ACROBATICS = 250
 local SKYDIVE_JUMP = 150
 local LATERAL_DEADZONE = 0.35
 
 local mode = nil          -- nil | "Skydive" | "Falling"
 local phase = nil
+local shown = nil         -- "<mode>/<variant>" actually handed to Anim
 local elapsed = 0
 local skydiveBoosted = false
 local skydiveReleased = false
@@ -33,14 +36,28 @@ local function applySkydiveBoost(enable)
     skydiveBoosted = enable
 end
 
+-- Keyed on what was PLAYED, not on mode/phase: start() sets mode before the
+-- first pose, so a nil variant (Falling) compared equal and never played.
 local function pose(name, variant, looping)
-    if mode == name and phase == variant then return end
+    local key = name .. "/" .. tostring(variant)
+    if shown == key then return end
+    shown = key
     phase = variant
     Anim.setPose(name, variant, looping)
 end
 
 function AirPose.active()
     return mode
+end
+
+function AirPose.inWater()
+    if types.Actor.isSwimming(mwSelf) then return true end
+    local cell = mwSelf.cell
+    -- `hasWater and waterLevel` is FALSE in a dry cell, not nil, and a nil
+    -- test let that through to a number-vs-boolean compare that threw every
+    -- airborne frame in a waterless interior.
+    if not (cell and cell.hasWater and cell.waterLevel) then return false end
+    return mwSelf.position.z <= cell.waterLevel
 end
 
 -- Latched when a released skydive touches down, because update() clears the
@@ -54,7 +71,7 @@ end
 function AirPose.clear()
     applySkydiveBoost(false)
     if mode then Anim.clearPose() end
-    mode, phase = nil, nil
+    mode, phase, shown = nil, nil, nil
     elapsed = 0
     skydiveReleased = false
 end

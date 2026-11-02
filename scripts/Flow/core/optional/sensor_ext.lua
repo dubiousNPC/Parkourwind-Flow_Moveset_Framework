@@ -105,6 +105,16 @@ function SensorExt.updateWallRun(dt, inputIntents, syncData)
     end
 end
 
+function SensorExt.reset()
+    local d = SensorExt.data
+    if d.interaction == "None" and d.targetPos == nil then return end
+    d.interaction = "None"
+    d.targetPos = nil
+    d.wallDist = 0
+    d.wallNormal = nil
+    d.debugReason = "Not asked"
+end
+
 function SensorExt.updateLedgeHang(dt, inputIntents, syncData)
     SensorExt.data.interaction = "None"
     SensorExt.data.targetPos = nil

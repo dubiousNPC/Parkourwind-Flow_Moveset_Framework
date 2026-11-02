@@ -74,6 +74,8 @@ local SWEEP_RAY_OPTS = {
     collisionType = nearby.COLLISION_TYPE.World + nearby.COLLISION_TYPE.HeightMap
 }
 
+local NAV_OPTS = { searchAreaHalfExtents = util.vector3(50, 50, 50) }
+
 local function getObjectName(obj)
     if not Settings.debugMode() then return "" end
     if not obj then return "Terrain" end
@@ -120,6 +122,18 @@ function Sensor.registerSharedRay()
     end
 
     I.SharedRay.requestDistance(Sensor.MAX_REACH)
+end
+
+-- Called instead of update on frames nothing asked for a reading.
+function Sensor.reset()
+    local d = Sensor.data
+    if d.interaction == "None" and d.debugReason == "Not asked" then return end
+    d.interaction = "None"
+    d.tooHigh = false
+    d.targetPos = nil
+    d.wallDist = 0
+    d.objHeight = 0
+    d.debugReason = "Not asked"
 end
 
 function Sensor.update(dt, inputIntents, syncData)
@@ -172,8 +186,10 @@ function Sensor.update(dt, inputIntents, syncData)
     end
 
     Sensor.data.wallDist = wallDist
-    Sensor.lastKnownObject = source
-    Sensor.lastKnownAngle = math.deg(math.acos(wallNormal.z))
+    if Settings.debugMode() then
+        Sensor.lastKnownObject = source
+        Sensor.lastKnownAngle = math.deg(math.acos(wallNormal.z))
+    end
 
     local intoWall = util.vector3(forward.x, forward.y, 0):normalize()
     local wallRight = wallNormal:cross(util.vector3(0, 0, 1)):normalize()
@@ -183,8 +199,6 @@ function Sensor.update(dt, inputIntents, syncData)
         Sensor.data.debugReason = "Bad Angle"
         return
     end
-
-    local wallAngle = math.deg(math.acos(wallNormal.z))
 
     local topHit = nil
     local isThinBeam = false
@@ -264,16 +278,15 @@ function Sensor.update(dt, inputIntents, syncData)
     local vaultHeight = relativeHeight <= Sensor.maxHurdleHeight()
 
     if not isThick and not isThinBeam then
-        local navPos = nearby.findNearestNavMeshPosition(candidateLandPos, {
-            searchAreaHalfExtents = util.vector3(50, 50, 50)
-        })
+        -- The navmesh query is the dearest call here; only a vault needs it.
+        local navPos = vaultHeight and nearby.findNearestNavMeshPosition(candidateLandPos, NAV_OPTS)
 
         if not vaultHeight then
             Sensor.data.interaction = "Mantle"
             Sensor.data.targetPos = topHit.hitPos
             Sensor.data.debugReason = "Thin/High"
         elseif navPos then
-            if wallAngle < Sensor.MIN_VAULT_ANGLE then
+            if math.deg(math.acos(wallNormal.z)) < Sensor.MIN_VAULT_ANGLE then
                 Sensor.data.interaction = "Mantle"
                 Sensor.data.targetPos = topHit.hitPos
                 Sensor.data.debugReason = "Slope"

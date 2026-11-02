@@ -76,6 +76,7 @@ HANDLERS = {
 KNOWN_EVENTS = {"UiModeChanged"}
 
 ALL_CTX = {"global", "local", "player", "menu", "load"}
+OPENERS = ("function", "if", "for", "while", "repeat")
 HEADER_RE = re.compile(r"---@omw-context\s+([a-z|]+)")
 
 
@@ -110,24 +111,37 @@ def depth1_keys(body):
     immediately, so `local x` would read as depth 1 and be reported as a bogus
     handler. That false positive is the whole reason parsing has a bad name
     here, so it is handled rather than tolerated.
+
+    `then` is NOT an opener, and counting it as one was a live bug: an
+    `if a then ... elseif b then ... end` inside the FIRST handler is two
+    `then` against one `end`, so the depth never came back to 1 and every key
+    after it was invisible. A planted UiModeChanged behind an elseif went
+    unreported - the exact mistake this file was written for. `function`, `if`,
+    `for`, `while` and `repeat` each take one `end`; `then`, `else` and
+    `elseif` take none.
     """
     keys = []
     depth = 0
     i = 0
     n = len(body)
+    pending_do = False
     while i < n:
         c = body[i]
         word = re.match(r"[A-Za-z_]\w*", body[i:])
         if word:
             w = word.group(0)
             prev_ok = i == 0 or not re.match(r"[\w.:]", body[i - 1])
-            if w == "function" and prev_ok:
+            if w in OPENERS and prev_ok:
                 depth += 1
+                pending_do = w in ("for", "while")
                 i += word.end()
                 continue
-            # `end` closes a function body; `do`/`then` open blocks inside one.
-            if w in ("do", "then", "repeat") and prev_ok:
-                depth += 1
+            # `do` after for/while is syntax; a bare `do ... end` is a block.
+            if w == "do" and prev_ok:
+                if pending_do:
+                    pending_do = False
+                else:
+                    depth += 1
                 i += word.end()
                 continue
             if w in ("end", "until") and prev_ok:

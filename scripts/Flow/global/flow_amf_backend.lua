@@ -40,20 +40,32 @@ local function onVaultStart(data)
     }
 end
 
-local M_TO_UNITS = 400
-local GRAVITY = 9.80665 * M_TO_UNITS
+-- OpenMW's Constants::GravityConst (8.96) x UnitsPerMeter (69.99). The old
+-- 9.81 x 400 was 6.3x the engine's, so every hand-off back to physics jolted.
+local GRAVITY = 627.2
 
+-- Ballistic arc on an ABSOLUTE curve from startPos, so the engine's own drift
+-- between frames never accumulates into it. The player side ray-checked this
+-- exact curve and cut `duration` short of any hit; this file cannot raycast.
 local function onBoostStart(data)
-    local id = data.actor.id
-    local v0z = math.sqrt(2 * GRAVITY * data.apexHeight)
-    local push = data.pushVelocity or util.vector3(0, 0, 0)
-
-    ActiveMoves[id] = {
+    ActiveMoves[data.actor.id] = {
         type = "Boost",
         actor = data.actor,
-        velocity = util.vector3(push.x, push.y, v0z),
-        maxDuration = data.maxDuration or 1.5,
+        startPos = data.startPos,
+        velocity = data.velocity,
+        gravity = data.gravity,
+        duration = data.duration,
         elapsed = 0,
+    }
+end
+
+-- Constant vertical speed until cancelled. The ladder state re-checks grip and
+-- headroom every frame and cancels; this only moves.
+local function onClimbStart(data)
+    ActiveMoves[data.actor.id] = {
+        type = "Climb",
+        actor = data.actor,
+        speed = data.speed,
     }
 end
 
@@ -181,13 +193,14 @@ local function onUpdate(dt)
                 if move.elapsed >= move.maxDuration then ActiveMoves[id] = nil end
 
             elseif move.type == "Boost" then
-                move.elapsed = move.elapsed + dt
-                move.velocity = move.velocity - util.vector3(0, 0, GRAVITY * dt)
-                nextPos = actor.position + move.velocity * dt
+                move.elapsed = math.min(move.elapsed + dt, move.duration)
+                local t = move.elapsed
+                nextPos = move.startPos + move.velocity * t
+                    - util.vector3(0, 0, 0.5 * move.gravity * t * t)
+                if t >= move.duration then ActiveMoves[id] = nil end
 
-                if move.elapsed >= move.maxDuration then
-                    ActiveMoves[id] = nil
-                end
+            elseif move.type == "Climb" then
+                nextPos = actor.position + util.vector3(0, 0, move.speed * dt)
 
             elseif move.type == "Vault" then
                 move.progress = move.progress + (dt / move.duration)
@@ -227,6 +240,8 @@ return {
         FLOW_SnapTo = onSnapTo,
         FLOW_Boost_Start = onBoostStart,
         FLOW_Boost_Cancel = onMoveCancel,
+        FLOW_Climb_Start = onClimbStart,
+        FLOW_Climb_Cancel = onMoveCancel,
         FLOW_Hop_Start = onHopStart,
         FLOW_Hop_Cancel = onMoveCancel,
         FLOW_Brace_Start = onBraceStart,

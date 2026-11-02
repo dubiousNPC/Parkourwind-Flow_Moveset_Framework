@@ -54,19 +54,19 @@ I.Settings.registerGroup({
         {
             key = "stateVault",
             name = "Vault",
-            description = "Hurdling knee-to-waist-height obstacles (25-50% of player height). Turning this off also stops the forward obstacle scan when Mantle is off too.",
+            description = "Hurdling knee-to-waist-height obstacles (18-58% of player height). Turning this off also stops the forward obstacle scan when Mantle is off too.",
             default = true, renderer = "checkbox"
         },
         {
             key = "stateMantle",
             name = "Mantle",
-            description = "Climbing onto waist-to-shoulder-height surfaces (51-80% of player height). Also used to climb up from a ledge hang - with this off, hanging still works but you cannot pull yourself over the top.",
+            description = "Climbing onto waist-to-head-height surfaces (up to 95% of player height). Also used to climb up from a ledge hang - with this off, hanging still works but you cannot pull yourself over the top.",
             default = true, renderer = "checkbox"
         },
         {
             key = "stateLedgeHang",
             name = "Ledge Hang",
-            description = "Catching overhead ledges in mid-air (110-130% of player height). Turning this off also removes the per-frame ledge probe while airborne, and makes Shimmy and Wall Boost unreachable - both are entered only from a hang.",
+            description = "Catching overhead ledges in mid-air while holding jump (78-138% of player height). Turning this off also removes the per-frame ledge probe while airborne, and makes Shimmy and Wall Boost unreachable - both are entered only from a hang.",
             default = true, renderer = "checkbox"
         },
         {
@@ -78,13 +78,13 @@ I.Settings.registerGroup({
         {
             key = "stateWallBoost",
             name = "Wall Boost",
-            description = "Jumping away from a ledge at an angle, boosted by Acrobatics. Requires Ledge Hang.",
+            description = "From a ledge hang or shimmy, a strafe key plus a jump press launches away from the wall at an angle, boosted by Acrobatics. Requires Ledge Hang.",
             default = true, renderer = "checkbox"
         },
         {
             key = "stateRoll",
             name = "Landing Roll",
-            description = "Tapping jump in mid-air near the ground to roll on landing, reducing fall damage. Turning this off also skips the ground-height probe that arming the roll would cast.",
+            description = "Tapping jump with forward held after a moment in the air arms a roll: Acrobatics is boosted through the landing, so the engine deals less fall damage. Turning this off also skips the ground-height probe that arming the roll would cast.",
             default = true, renderer = "checkbox"
         },
         {
@@ -114,7 +114,7 @@ I.Settings.registerGroup({
         {
             key = "skillChecks",
             name = "Skill Checks",
-            description = "Measure Acrobatics, Agility and remaining fatigue against each move. A failed check never blocks the move: it botches it, so the landing becomes a stumble. Ledge Hang, Landing Roll, Ladder Climb and Skydive are never checked.",
+            description = "Measure Acrobatics, Agility and remaining fatigue against each move (a fixed threshold, not a dice roll). A failed check never blocks the move: it botches it, so the landing becomes a stumble. Ledge Hang, Landing Roll, Ladder Climb and Skydive are never checked.",
             default = true, renderer = "checkbox"
         },
         {
@@ -127,7 +127,7 @@ I.Settings.registerGroup({
         {
             key = "staminaScale",
             name = "Fatigue Cost",
-            description = "Scales the fatigue every move spends. 0 stops the spending. Fatigue is never a gate on its own - an empty bar lowers the skill check, it does not take the move away.",
+            description = "Scales the fatigue every move spends; carrying more raises it, up to double at full encumbrance. 0 stops the spending. Fatigue is never a gate on its own - an empty bar lowers the skill check, it does not take the move away.",
             default = 1.0, renderer = "number",
             argument = { min = 0.0, max = 3.0 }
         },
@@ -215,7 +215,7 @@ return {
     skillChecks = function() return challenge("skillChecks", true) end,
     skillDifficulty = function() return challenge("skillDifficulty", 1.0) end,
     staminaScale = function() return challenge("staminaScale", 1.0) end,
-    skydiveWindup = function() return challenge("skydiveWindup", 2.0) end,
+    skydiveWindup = function() return challenge("skydiveWindup", 3.0) end,
 
     stateEnabled = stateEnabled,
 }

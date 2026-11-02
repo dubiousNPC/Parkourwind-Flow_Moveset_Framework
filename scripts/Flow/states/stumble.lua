@@ -8,35 +8,23 @@
 -- on the fall damage landing hard enough.
 local mwSelf = require('openmw.self')
 local types = require('openmw.types')
-local I = require('openmw.interfaces')
 local BaseState = require('scripts/Flow/states/base_state')
 local Anim = require('scripts/Flow/playerAnim')
 local SkillCheck = require('scripts/Flow/core/skill_check')
 
-local StumbleState = BaseState.new("Stumble")
+local StumbleState = BaseState.new("Stumble", { overrides = "movement", anim = "oneshot" })
 
 local DURATION = { stumble = 1.00, knockdown = 1.50 }
 
 local timeInState = 0
 local kind = "stumble"
-local pending = nil
 
-function StumbleState.request(which)
-    pending = DURATION[which] and which or "stumble"
-end
-
-function StumbleState:enter(syncData)
+-- payload { kind = "stumble" | "knockdown" }; anything else is a stumble.
+function StumbleState:enter(payload)
     timeInState = 0
-    self.abort = false
-    kind = pending or "stumble"
-    pending = nil
+    kind = (payload and DURATION[payload.kind]) and payload.kind or "stumble"
     SkillCheck.clearBotch()
-    I.Controls.overrideMovementControls(true)
     Anim.setVariant(kind)
-end
-
-function StumbleState:exit()
-    I.Controls.overrideMovementControls(false)
 end
 
 function StumbleState:update(dt, syncData, inputData)
@@ -53,10 +41,6 @@ function StumbleState:update(dt, syncData, inputData)
     if timeInState >= DURATION[kind] then return "Idle" end
 
     return nil
-end
-
-function StumbleState.getDebug()
-    return string.format("%s %.2f", kind, timeInState)
 end
 
 return StumbleState

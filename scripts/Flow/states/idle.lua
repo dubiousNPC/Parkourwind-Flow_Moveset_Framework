@@ -1,18 +1,17 @@
 ---@omw-context player
 local BaseState = require('scripts/Flow/states/base_state')
 local SkillCheck = require('scripts/Flow/core/skill_check')
-local types = require('openmw.types')
-local mwSelf = require('openmw.self')
-local Sensor = require('scripts/Flow/core/sensor')
-local VaultState = require('scripts/Flow/states/vault')
-local MantleState = require('scripts/Flow/states/mantle')
-local LadderState = require('scripts/Flow/states/ladder')
+local StateManager = require('scripts/Flow/core/state_manager')
 
-local IdleState = BaseState.new("Idle")
+local IdleState = BaseState.new("Idle", { sensors = { forward = true } })
+
+-- Lowest first; each target's canEnter decides. No fatigue gate here: an empty
+-- bar lowers the skill check, it never takes the move away (skill_check.lua).
+local JUMP_RUNGS = { "Vault", "Mantle" }
 
 -- Safety net: a botch that never reached a Stumble must not survive into
 -- the next jump.
-function IdleState:enter(syncData)
+function IdleState:enter()
     SkillCheck.clearBotch()
 end
 
@@ -21,25 +20,11 @@ function IdleState:update(dt, syncData, inputData)
         return "Airborne"
     end
 
-    if inputData.jump then
-        local fat = types.Actor.stats.dynamic.fatigue(mwSelf).current
-
-        if Sensor.data.interaction == "Vault" and not VaultState.isBlocked(Sensor.data.targetPos) then
-            if fat > 5 then return "Vault" end
-        elseif Sensor.data.interaction == "Mantle" and not MantleState.isBlocked(Sensor.data.targetPos) then
-            if fat > 10 then return "Mantle" end
-        end
-    end
+    if inputData.jump and StateManager.tryAny(JUMP_RUNGS) then return end
 
     if inputData.moveVector.y > 0.1 then
-        local lp, ln = LadderState.probe()
-        if lp then
-            LadderState.setLadder(lp, ln)
-            return "Ladder"
-        end
+        return "Ladder"
     end
-
-    return nil
 end
 
 return IdleState

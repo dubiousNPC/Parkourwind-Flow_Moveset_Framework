@@ -73,8 +73,8 @@ local GROUPS = {
         stopKey = "stop",
     },
 
-    -- skydive1 is the windup, `skydive` the looping idle: two groups since
-    -- v0.82, so the hand-over is a group change and not a key change.
+    -- skydive1 is the windup, `skydive` the looping idle: the hand-over is a
+    -- group change, not a key change.
     Skydive   = {
         variants = { entry = "skydive1", loop = "skydive",
                      left = "skydivel", right = "skydiver",
@@ -88,7 +88,7 @@ local GROUPS = {
     },
 
     Falling   = {
-        group = "pwfall1", speed = 1,
+        group = "pwfalling", speed = 1,
         priority = PRIORITY_FLOW,
         blendMask = animation.BLEND_MASK.All,
         startKey = "start",
@@ -98,7 +98,7 @@ local GROUPS = {
     -- "stumble" after a botched manoeuvre; "knockdown" after a skydive, at
     -- Scripted priority so it plays over whatever the engine is doing.
     Stumble   = {
-        variants = { stumble = "pwfall1", knockdown = { "pwfall1", "pwfall3", "pwfall4" } },
+        variants = { stumble = "dbsfall", knockdown = { "pwfalling", "dbsfall" } },
         variantPriority = { knockdown = PRIORITY_SCRIPTED },
         speed = 1,
         priority = PRIORITY_FLOW_MAJOR,
@@ -107,10 +107,6 @@ local GROUPS = {
         stopKey = "stop",
     },
 }
-
-local LOOPING_STATES = { LedgeHang = true, Ladder = true }
-local ONE_SHOT_STATES = { Vault = true, Mantle = true, Roll = true,
-                          Shimmy = true, WallBoost = true, Stumble = true }
 
 local currentGroup = nil
 
@@ -122,7 +118,7 @@ function Anim.registerAnimRefresh()
     if not I.AnimRefresh then
         print("[FLOW:Anim] I.AnimRefresh not found - poses will not survive a "
             .. "first/third-person switch. Make sure scripts/AnimRefresh/"
-            .. "AnimRefresh_v5.lua is registered in FLOW_AMF.omwscripts.")
+            .. "AnimRefresh_v6.lua is registered in FLOW_AMF.omwscripts.")
         return
     end
 
@@ -140,7 +136,7 @@ function Anim.skydiveWindupSpeed()
     local windup = math.max(0.5, Settings.skydiveWindup())
     local span = SKYDIVE_RELEASE_SPAN
     if animation.getTextKeyTime then
-        local release = animation.getTextKeyTime(self, "skydive1: stop")
+        local release = animation.getTextKeyTime(self, "skydive1: release")
         local from = animation.getTextKeyTime(self, "skydive1: start")
         if release and from and release > from then span = release - from end
     end
@@ -376,13 +372,12 @@ function Anim.clearPose()
     stopCurrent()
 end
 
-function Anim.onStateChange(newState, oldState)
-    if ONE_SHOT_STATES[newState] then
-        lastRequest = { state = newState, looping = false }
-        playGroup(newState, false)
-    elseif LOOPING_STATES[newState] then
-        lastRequest = { state = newState, looping = true }
-        playGroup(newState, true)
+-- `mode` is the entering state's traits.anim: "oneshot", "loop" or nil.
+function Anim.onStateChange(newState, oldState, mode)
+    if mode == "oneshot" or mode == "loop" then
+        local looping = mode == "loop"
+        lastRequest = { state = newState, looping = looping }
+        playGroup(newState, looping)
     else
         lastRequest = nil
         stopCurrent()

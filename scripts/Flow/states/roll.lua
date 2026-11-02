@@ -1,25 +1,33 @@
 ---@omw-context player
 -- Landing roll. Committed action; see README.
+--
+-- Fall damage is the engine's, and the engine reads Acrobatics for it: every
+-- point takes 1.5 units off the effective fall and 1% off the damage scale.
+-- So the roll is an Acrobatics bonus held across the impact, not a heal after.
+-- Airborne arms it on the tap; Roll owns it from touchdown and drops it once
+-- the landing damage has been dealt.
 local BaseState = require('scripts/Flow/states/base_state')
 local types = require('openmw.types')
 local mwSelf = require('openmw.self')
-local I = require('openmw.interfaces')
-local Settings = require('scripts/Flow/settings')
+local Owned = require('scripts/Flow/core/owned')
 
-local RollState = BaseState.new("Roll")
+-- The movement override is load-bearing: it suppresses jump and lets the state
+-- drive forward motion itself.
+local RollState = BaseState.new("Roll", { overrides = "movement", anim = "oneshot" })
 
 local ROLL_DURATION = 1.07   -- pwroll1's own length, read from the .kf
 
-local REFUND_MIN = 0.25
-local REFUND_MAX = 0.75
-local REFUND_SKILL_CAP = 100.0
+local ACROBATICS_BONUS = 50
+-- Held this long into the roll so the engine's landing frame sees it, whichever
+-- side of Lua's update the damage lands on.
+local IMPACT_WINDOW = 0.25
 
-local DAMAGE_WATCH_WINDOW = 0.25
+local buffApplied = false
 
-local pendingHealthBefore = nil
-
-function RollState.setLandingData(healthBefore)
-    pendingHealthBefore = healthBefore
+function RollState.setBuff(enable)
+    if enable == buffApplied then return end
+    Owned.skill('acrobatics', enable and ACROBATICS_BONUS or -ACROBATICS_BONUS)
+    buffApplied = enable
 end
 
 local FORWARD_DRIVE = 1.0
@@ -31,33 +39,19 @@ end
 local INTERRUPT_GRACE = 0.1
 
 local timeInState = 0
-local healthBefore = nil
-local refundApplied = false
 
-local function refundFraction()
-    local acro = types.NPC.stats.skills.acrobatics(mwSelf).modified or 0
-    local t = math.min(1.0, math.max(0.0, acro / REFUND_SKILL_CAP))
-    return REFUND_MIN + (REFUND_MAX - REFUND_MIN) * t
-end
-
-function RollState:enter(syncData)
+function RollState:enter()
     timeInState = 0
-    refundApplied = false
-
-    healthBefore = pendingHealthBefore
-    pendingHealthBefore = nil
-
-    I.Controls.overrideMovementControls(true)
 end
 
 function RollState:exit()
-    healthBefore = nil
-    refundApplied = false
-    I.Controls.overrideMovementControls(false)
+    RollState.setBuff(false)
 end
 
 function RollState:update(dt, syncData, inputData)
     timeInState = timeInState + dt
+
+    if timeInState > IMPACT_WINDOW then RollState.setBuff(false) end
 
     if timeInState > INTERRUPT_GRACE and interrupted() then
         return "Idle"
@@ -67,20 +61,6 @@ function RollState:update(dt, syncData, inputData)
     mwSelf.controls.sideMovement = 0
     mwSelf.controls.run = true
     mwSelf.controls.jump = false
-
-    if not refundApplied and healthBefore and timeInState <= DAMAGE_WATCH_WINDOW then
-        local hp = types.Actor.stats.dynamic.health(mwSelf)
-        local lost = healthBefore - hp.current
-
-        if lost > 0 then
-            -- Don't resurrect: if the fall was fatal, leave it fatal.
-            if hp.current > 0 then
-                local refund = lost * refundFraction()
-                hp.current = math.min(hp.base + hp.modifier, hp.current + refund)
-            end
-            refundApplied = true
-        end
-    end
 
     if timeInState >= ROLL_DURATION then
         return "Idle"

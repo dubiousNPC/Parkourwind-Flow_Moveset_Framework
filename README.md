@@ -45,7 +45,7 @@ reach of everything else.
 |---|---|---|
 | 1 | **Vault** | 18-58% of height, destination not blocked |
 | 2 | **Mantle** | to 95%, destination not blocked |
-| 3 | **LedgeHang** | hands can reach the lip (78-138% of height), lip above the catch floor, **and the camera looking at or above level** |
+| 3 | **LedgeHang** | hands can reach the lip (78-138% of height), lip above the catch floor, **and the camera looking at or above level** (jump held) |
 
 WallJump was rung 4 until v0.82 and is parked in `states/optional/`; see that
 folder's README for the exact rung it occupied and what has to come back with
@@ -61,8 +61,11 @@ ladder reach 70→95 and the roll's minimum air time 1.0→0.75s.
 Skydive is **not** on this ladder. It is a pose, not a state (see below), so
 everything above stays reachable while it runs.
 
-Resolved in `states/airborne.lua`'s `update`, in that order. From the ground,
-`states/idle.lua` resolves Vault then Mantle; the other two are airborne-only.
+Airborne offers `{ "Vault", "Mantle", "LedgeHang" }` to `StateManager.tryAny`
+while jump is held; the first whose `canEnter` accepts wins, and if all refuse
+Airborne carries on with its own frame. From the ground Idle offers Vault then
+Mantle the same way. Each gate in the table above lives in that state's
+`canEnter`.
 
 The camera gate uses `I.SharedRay`, which is camera-aimed, and compares its hit
 height to the lip. That answers "pitched up towards the target" without
@@ -151,50 +154,6 @@ resolves by load order rather than by intent. Resolved in v0.81-82 by deleting
 the `xclimbing1.kf` / `xClimbing1kna.kf` duplicates; no folder now declares a
 group twice.
 
-Measured clip lengths, used to set state durations, animation speeds and blend
-times. As of v0.79 every set agrees, which it did not before:
-
-| clip | length |
-|---|---|
-| `pwwalljump1` (brace) | 0.333s |
-| `pwvault1/2/3`, `pwmantle1/2/3` | 0.40s |
-| `pwboostup`, `pwboostbkl/r`, `pwropeidle`, `skydivel/r` | 0.50s |
-| `pwladderidle` | 0.833s |
-| `pwropeup/dwn`, `skydivefwd`, `dbsfall`, `dbsdive` | 1.00s |
-| `pwroll1`, `pwwallhangidle` | 1.067s |
-| `pwfalling` | 1.50s (loops 0.033-1.467) |
-| `pwrun1` | 1.50s |
-| `pwladderdwn` | 2.50s |
-| `pwladderup` | 2.867s |
-| `skydive1` (windup) | 9.967s, `release` at 5.967 |
-| `skydive` (idle) | 2.867s, loops 10.533-13.333 |
-
-Shimmy is keyed `pwshimmyl1`/`pwshimmyr1` in the three third-person sets and
-`pwshimmy1l`/`pwshimmy1r` in the three `.1st` sets. Both spellings are listed
-as interchangeable so either POV resolves.
-
-`pwwalljump2` was removed from every set and is no longer referenced.
-`pwropeup2` is gone with the last `xClimbing1kna.kf`; nothing played it.
-
-**`dbsdive` was re-cut in v0.82** from 1.967s with `loop start` / `loop stop` to
-a flat 1.000s with start/stop only. That silently unplayed Dive's loop and land
-passes, which named those keys - and is why `tools/check_anims.py` now verifies
-the keys a slot names and not just that start and stop exist.
-
-**One group, one file per folder.** Every `.kf` in `animations/<skeleton>/` is
-added as an animation source, so a group defined in two files in the same folder
-resolves by load order rather than by intent. Two live cases:
-
-- **Fixed for the human skeletons, still live for the beast one.**
-  `xbase_animkna/` has both `xClimbing1kna.kf` and `xParkourwind1kna.kf`
-  declaring `pwladderidle`, `pwladderup`, `pwladderdwn` and the three rope
-  groups, at different times (`pwladderup` is 2.867s in one and 2.833s in the
-  other). The human folders were resolved by deleting `xclimbing1.kf`; the same
-  decision is still outstanding here.
-- `xbase_animkna.1st/` shipped `xParkourwind1kna.kf` beside
-  `xParkourwind1.1st.kf`, declaring the same groups with the pre-v0.79 timings
-  and no `pwboostup` at all. That file is deleted here.
-
 A state that ends before its clip cuts the animation, because leaving the state
 cancels the group. Visible time is `min(state window, clip / speed)`:
 
@@ -245,10 +204,14 @@ pre-empts the landing roll, because the stumble *is* the failure.
 | LedgeHang, Roll, Ladder, Skydive | **exempt** | 0 |
 | Vault | 8 | 3 |
 | Shimmy | 15 | 2 |
-| Mantle | 18 | 6 |
+| Mantle | 18 | 8 |
 | Dive | 30 | 6 |
 | WallBoost | 35 | 8 |
 | WallJump | 45 | 10 |
+
+Costs scale with load: `fatigue x (1 + encumbrance/capacity)`, so a full pack
+doubles them, then by the **Fatigue Cost** setting. Mantle used to charge a
+second, private 20 x load on top that ignored the setting; it is folded in here.
 
 **There is no fatigue gate.** Exhaustion is already in the formula through the
 fatigue term, and nowhere else. An earlier affordability test sat *ahead* of the
@@ -271,6 +234,16 @@ actor: no teleport, no lerp, no backend event, and a marker enforces that.
 once per airborne period. Jump controls stay native throughout and **a jump
 press cancels it**. The only mechanical effect is +250 Acrobatics and +150 Jump,
 through `Owned`, so a save taken mid-skydive is undone on load.
+
+**Water also cancels it, and owes nothing** - no knockdown, and no stumble left
+waiting for a botched manoeuvre. Swimming is never `isGrounded`, so without that
+test the pose rode out the swim and knocked the player down on reaching the
+shore. The test costs no ray: `cell.waterLevel` is a flat number and
+`position.z` is the feet, so the compare fires at the surface, earlier than
+`types.Actor.isSwimming` turns true, and both are checked. Note that
+`AnyPhysical - Water` on a ray *excludes* water, which is the opposite of
+detecting it - useful for a short ground probe that should not treat a surface
+as footing, not for finding water.
 
 `xSkyFall.kf` splits the move across **two groups** as of v0.82, which is what
 makes the hand-over smooth: `skydive1` is the windup, and `skydive` is a
@@ -315,6 +288,36 @@ engine builds constantly are shield (`Block`), torch (`Torch`) and hit (`Hit`),
 and it never plays at uniform `Scripted` — only mwscript `PlayGroup` and other
 mods' scripted animations do.
 
+## Writing a state
+
+`states/base_state.lua` is the contract. In short:
+
+```lua
+local Vault = BaseState.new("Vault", {
+    overrides = "all",          -- nil | "movement" | "all"
+    suspend = true,             -- Levitate against gravity
+    teleports = true,           -- backend moves the actor
+    anim = "oneshot",           -- nil | "oneshot" | "loop"
+    sensors = { forward = true, ledge = true },   -- run while jump is held
+})
+function Vault:canEnter(payload, from) ... return plan or nil end
+function Vault:enter(plan, from) end
+function Vault:exit(to) end
+function Vault:update(dt, sync, input) return "Idle", payload end
+```
+
+- **Refuse in `canEnter`, never in `enter`.** It runs before the current state
+  exits, so a refusal changes nothing. Plan the move there (trajectory,
+  destination probes) and hand the plan to `enter`, which only commits.
+- **Pass data as a payload,** not through another state's module. `return
+  "Shimmy", { lip, normal, dir }` reaches `Shimmy:canEnter(payload)`. A state
+  never needs to `require` the states it routes to.
+- **Offer several targets with `StateManager.tryAny(list)`**, lowest first, and
+  `return` if it took one. That is how Airborne's ladder is built.
+- **Sensors are opt-in.** `main.lua` runs `Sensor` / `SensorExt` only for the
+  active state's `sensors` trait and only while jump is held (always in debug
+  mode). Anything else reads a cleared result.
+
 ## Implementation notes
 
 Constraints that span two files, where nothing else connects them. Everything
@@ -334,12 +337,13 @@ else lives in `RESEARCH.md`.
   interface, and derives distance from `hitPos`, which every copy provides.
   That distance is horizontal from the feet: SharedRay's own `distance` is
   from the camera, which in third person sits behind the reach entirely.
-- **`main.lua`'s `OVERRIDE_STATES` must list every state that holds an
-  `I.Controls` override.** The safety net releases overrides once, on the
-  frame FLOW leaves one of those states. It must not release every frame:
-  `overrideMovementControls` is a single shared flag, and a per-frame release
-  cancelled other mods' overrides (HookShot's rappel hang) while FLOW sat in
-  Idle. Currently: Vault, Mantle, LedgeHang, Shimmy, WallBoost, Ladder, Roll.
+- **Overrides, Levitate and teleport suspension are traits, held by the FSM.**
+  A state declares them in `BaseState.new(name, traits)`; `StateManager`
+  applies the diff between the old and new state's traits, between `exit` and
+  `enter`. It writes `overrideMovementControls` only when the held value
+  changes: the flag is shared, and a per-frame release cancelled other mods'
+  overrides (HookShot's rappel hang) while FLOW sat in Idle. A state must not
+  call `I.Controls` or apply Levitate itself.
 - **One wall jump per confirmed landing.** `EngineSync` counts a landing once
   the feet have been down for `GROUND_CONFIRM`, every frame and in any state.
   The count used to live in Airborne, which leaves on the first grounded
@@ -375,106 +379,19 @@ else lives in `RESEARCH.md`.
   a soft dependency tested with `vfs.fileExists`, so which implementation is
   running is otherwise unanswerable from a log.
 
-### WallJump, rebuilt
+### Landing roll
 
-Jump into a wall, then press jump again within 0.45s while still touching it,
-for a boosted second jump straight up. `pwwalljump1` or `pwwalljump2`, one-shot. Acrobatics
-scales the apex and is fortified for the launch, alongside a `Jump` active
-effect so the boost reads correctly in the magic menu. Toggle: **Wall Jump**.
-
-The original was removed for three separate reasons, and none of them survive
-here:
-
-| old cause | now |
-|---|---|
-| fixed teleport-lerp toward a spawned platform mesh | `FLOW_Hop_Start`, a Z-only curve, nothing spawned |
-| per-tick collision cage clamped the move to zero against the wall | the hop path does no cage work at all |
-| animation group named `pwwalljump`, which does not exist | `pwwalljump1`, verified in all three shipped `.kf` sets |
-
-That third one was the T-pose: a full-body blend mask over a missing group
-leaves nothing driving the skeleton.
-
-**Cost when idle: nothing.** Wall contact is answered in the Jump trigger
-handler, so no ray is cast until the player actually asks for a wall jump, and
-the common case (facing the wall) costs one ray. The only per-frame addition
-anywhere is a single `timeAirborne` accumulator.
-
-One wall jump per confirmed landing; see the notes above.
-
-### Roll is now a committed action
-
-- **Needs a real fall.** One second airborne before a tap arms anything, so hops
-  and single steps down no longer offer a roll.
-- **Uninterruptible** except by knockdown, paralysis or death — one
-  `types.Actor.canMove()` call covers all three. The old "ground went away" bail
-  is gone, so rolling off a ledge finishes the roll.
-- **Always travels forward**, on the character's facing rather than the stick, at
-  run speed.
-- **Jump does nothing** for the duration.
-
-The last three are one mechanism: `overrideMovementControls(true)` suppresses
-jump *and* stops the engine writing `self.controls`, so the state drives movement
-itself. `Roll` is therefore in `main.lua`'s `OVERRIDE_STATES` — without that the
-safety net releases the override and the roll is silently jumpable and
-stationary.
-
-The fall gate and the wall-jump window also disambiguate the two gestures
-without a priority rule: a wall jump is only offered below 0.45s airborne and a
-roll only above 1.0s, so one tap can never satisfy both.
-
-### AnimRefresh v3 → v4
-
-`scripts/AnimRefresh/AnimRefresh_v4.lua` replaces the v3 copy. The filename
-carries the version on purpose: two mods shipping the same filename occupy one
-VFS path, so the version guard inside the file only helps once the names
-differ.
-
-What FLOW gets out of it:
-
-| | v3 | v4 |
-|---|---|---|
-| callbacks per POV press | 4 | 1, plus FLOW's opt-in verify pass |
-| idle → auto-vanity → back | 5 spurious callbacks | 0 |
-| refresh after Rest / Travel / Training / Jail | never | yes |
-| refresh after loading a save | never | yes |
-
-The auto-vanity row is the one that mattered in play. v3 fired on every hop
-between ThirdPerson, Preview and Vanity, none of which rebuild the model, so
-hanging from a ledge long enough to trigger vanity restarted the hang pose.
-
-Two things changed on FLOW's side of the interface.
-
-**`reissue()` is now idempotent.** v4 delivers once shortly after `subscribe()`
-and twice after `onLoad`, so the callback is called when nothing was lost.
-`reissue()` returns early if `animation.isPlaying` says the group it last asked
-for is still running. It deliberately tests the group actually in flight rather
-than re-resolving from `GROUPS`, because Vault and Mantle pick their clip at
-random and re-resolving could cancel a good pose to play a sibling of it.
-
-**FLOW passes `{ verify = true }`.** Take a Seat declines that option because a
-second delivery restarts its looping pose visibly. With the guard above, FLOW's
-second delivery is a no-op whenever the pose survived and a rescue when a late
-rebuild dropped it. The opt-in is only valid while that guard exists.
-
-The path matters as much as the version. At the old root-level path FLOW's
-copy was a separate script from everyone else's. At the shared path OpenMW
-merges every registration into one script, so its place in the load order is
-no longer FLOW's to decide.
-
-The subscription used to run at file scope in `playerAnim.lua`, which only
-worked while AnimRefresh happened to load before `main.lua`. When it didn't,
-the `if I.AnimRefresh` guard skipped it without a word and poses stopped
-surviving a POV switch.
-
-It now runs from `main.lua`'s `onActive` as `Anim.registerAnimRefresh()`. That
-is the binding point `Sensor.registerSharedRay()` already uses, and every
-player script has loaded by then. A missing interface is printed, not skipped.
-A simulation with AnimRefresh loading after FLOW: the old code fails to
-subscribe and reports nothing; the new code subscribes and reports absence.
-
-### SharedRay moved to the shared path
-
-`SharedRay/SharedRay_v2.lua` is now `scripts/SharedRay/SharedRay_v2.lua`,
-the path Take a Seat and ForceChoke use. The file was already byte-identical
-to theirs. At the root path it ran as a redundant second script that stood
-down behind the version guard; now it merges with theirs.
+- **Arms on a tap** with forward held, after 0.75s airborne, so hops and single
+  steps down offer nothing.
+- **Acrobatics is what protects.** The engine's fall damage reads Acrobatics:
+  each point takes 1.5 units off the effective fall and 1% off the damage
+  scale. The tap applies +50 through `Owned`; Roll keeps it on for the first
+  0.25s on the ground, so the engine's landing frame sees it whichever side of
+  Lua's update the damage lands, then drops it. Until v0.84 this was +70
+  Agility, which fall damage ignores, plus a heal afterwards.
+- **Uninterruptible** except by knockdown, paralysis or death - one
+  `types.Actor.canMove()` call covers all three.
+- **Always travels forward**, at run speed, and **jump does nothing** for the
+  duration. Both come from the `overrides = "movement"` trait: the override
+  suppresses jump and stops the engine writing `self.controls`, so the state
+  drives movement itself.

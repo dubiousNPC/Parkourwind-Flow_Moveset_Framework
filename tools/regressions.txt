@@ -52,8 +52,9 @@ why: core.isWorldPaused is a FUNCTION. Referenced without calling, the truthy fu
 needs: core.isWorldPaused()
 
 file: scripts/Flow/core/state_manager.lua
-why: a state may refuse on entry. Announcing and animating before checking abort is what made a refused Mantle look like a successful one for several sessions.
-needs: StateManager.activeState.abort
+why: a state may refuse on entry. Announcing and animating before checking abort is what made a refused Mantle look like a successful one for several sessions. Since v0.84 refusal is canEnter, run BEFORE the current state exits, so a refused move also never runs an exit for a move that did not start.
+needs: nextState:canEnter(payload, prevName)
+needs: if plan == nil then
 
 file: scripts/Flow/core/sensor.lua
 why: SharedRay's interface SHAPE is not guaranteed by its version number. Reading ray.distance directly raised 'attempt to compare nil with number' 1604 times in one session; the distance must be derived from hitPos. It is also measured from the feet: ray.distance is from the camera.
@@ -77,13 +78,14 @@ needs: HANDS_FRAC
 needs: PROBE_ABOVE
 needs: PROBE_BELOW
 
-file: scripts/Flow/states/airborne.lua
-why: the LedgeHang reach check measures against grabFloorHeight, the bottom of what the hands can catch - not the hands height itself, and not the wall-probe height, which sits lower still. Reading the wrong one either rejects every reachable lip or lets the grab pull downwards.
+file: scripts/Flow/states/ledge_hang.lua
+why: (LedgeHang's canEnter since v0.84) the LedgeHang reach check measures against grabFloorHeight, the bottom of what the hands can catch - not the hands height itself, and not the wall-probe height, which sits lower still. Reading the wrong one either rejects every reachable lip or lets the grab pull downwards.
 needs: SensorExt.grabFloorHeight()
 
 file: scripts/Flow/main.lua
-why: the throttle gate reads self.controls.run. Written as mwSelf - the idiom every other file uses - it indexed an undeclared global and threw every frame, killing Sensor, SensorExt, StateManager and the HUD while init still logged normally.
-needs: self.controls.run
+why: main.lua names openmw.self `self`, not mwSelf. v0.84 removed the idle throttle that read self.controls.run (sensors are demand-gated instead), but the lesson stands: written as mwSelf it indexed an undeclared global and threw every frame, killing the pipeline while init still logged normally.
+needs: local self = require('openmw.self')
+needs: not-present mwSelf
 
 file: scripts/Flow/main.lua
 why: Anim.verifyGroups must stay guarded. Unguarded it raised 'attempt to call field verifyGroups (a nil value)' and took down onUpdate when main.lua and playerAnim.lua came from different builds.
@@ -106,9 +108,9 @@ why: the soft dependency is tested with vfs.fileExists, not pcall(require). The 
 needs: vfs.fileExists
 needs: not-present pcall
 
-file: scripts/Flow/main.lua
-why: Roll and WallJump both hold a movement override that is load-bearing - Roll uses it to suppress jump and drive forward motion. A state holding an override without being listed in OVERRIDE_STATES has it released on the next tick by the safety net, silently, and the feature just looks broken.
-needs: Roll = true
+file: scripts/Flow/states/roll.lua
+why: Roll's movement override is load-bearing - it suppresses jump and lets the state drive forward motion. Since v0.84 the FSM holds overrides from a state's traits; a state that drops `overrides` silently becomes jumpable and stationary.
+needs: overrides = "movement"
 
 file: scripts/Flow/states/roll.lua
 why: the roll is uninterruptible except by knockdown or death. types.Actor.canMove covers dead, paralyzed AND knocked down in one call. The forbidden shape is the UNGUARDED ground bail that cut the animation when rolling off a ledge; the dive hand-off is a guarded return and is meant to be there.
@@ -164,9 +166,9 @@ why: isOnGround must be read every frame, before the teleport test. A fixed 10 u
 needs: updateGround(dt)
 needs: TELEPORT_SPEED
 
-file: scripts/Flow/main.lua
-why: overrideMovementControls is one shared flag. Releasing it every frame outside FLOW's own states cancelled HookShot's rappel hang. Release once, on leaving an override state.
-needs: overrideHeld
+file: scripts/Flow/core/state_manager.lua
+why: overrideMovementControls is one shared flag. Releasing it every frame outside FLOW's own states cancelled HookShot's rappel hang. The FSM writes it only when the held value changes between two states' traits.
+needs: if movement ~= held.movement then
 
 file: scripts/Flow/main.lua
 why: Levitate and stat bonuses are written into a save made mid-move. onLoad undoes what onSave recorded.
@@ -182,10 +184,12 @@ why: ladder.lua calls Anim.replay on every direction change. It did not exist, s
 needs: function Anim.replay
 
 file: scripts/Flow/states/wall_boost.lua
-why: acrobatics is a skill. FortifyAttribute with 'acrobatics' made a junk magic-menu entry.
-needs: EFFECT_TYPE.FortifySkill
+why: acrobatics is a skill, and a buff is written ONCE, as the stat modifier. v0.83 also wrote a matching Fortify active effect on top, so the bonus was either inert or doubled; before that, FortifyAttribute with 'acrobatics' made a junk magic-menu entry.
+needs: Owned.skill('acrobatics'
+needs: not-present EFFECT_TYPE.FortifySkill
+needs: not-present EFFECT_TYPE.FortifyAttribute
 
-file: scripts/Flow/states/airborne.lua
+file: scripts/Flow/states/ledge_hang.lua
 why: the ledge aim test uses the look DIRECTION (camera position to the camera's hit), not the hit's absolute Z. Comparing absolute Z to the lip rejected any shot that landed on the wall below it, which is most of them, and that is why LedgeHang appeared dead. Direction is also free of any pitch sign convention.
 needs: camera.getPosition()
 
@@ -275,9 +279,12 @@ why: Skydive is tested BELOW the priority ladder and only once per airborne peri
 needs: skydiveTried
 needs: SKYDIVE_ARM_TIME
 
+file: scripts/Flow/states/stumble.lua
+why: Stumble holds a movement override for the clip; since v0.84 that is its `overrides` trait.
+needs: overrides = "movement"
+
 file: scripts/Flow/main.lua
-why: Stumble holds a movement override. A state holding one without being listed in OVERRIDE_STATES has it released by the per-tick safety net on the next frame, silently. Dive is no longer a state and must not come back as one.
-needs: Stumble = true
+why: Dive is no longer a state and must not come back as one; WallJump is parked.
 needs: not-present states/dive
 needs: not-present states/wall_jump
 
@@ -299,9 +306,13 @@ why: the skydive windup is read from the clip's own `skydive: release` key, so m
 needs: skydive1: release
 
 file: scripts/Flow/states/airborne.lua
-why: the priority ladder is Vault, then Mantle, then LedgeHang, in that order, and the ledge rung is gated on the camera. WallJump used to sit under it and is parked in states/optional/; nothing may be added above LedgeHang without re-reading README's Action priority.
-needs: lookingAtLedge
-needs: not-present return "WallJump"
+why: the priority ladder is Vault, then Mantle, then LedgeHang, in that order, and the ledge rung is gated on the camera (LedgeHang's canEnter). WallJump used to sit under it and is parked in states/optional/; nothing may be added above LedgeHang without re-reading README's Action priority.
+needs: { "Vault", "Mantle", "LedgeHang" }
+needs: not-present WallJump
+
+file: scripts/Flow/states/ledge_hang.lua
+why: the ledge rung is gated on the camera.
+needs: lookingAtLedge()
 
 file: scripts/Flow/core/air_pose.lua
 why: Dive is parked. Bringing startDive() back here without the rest of states/optional/dive_pose.lua gives a pose with no arming and no Speed bonus.
@@ -321,3 +332,99 @@ file: tools/check_anims.py
 why: the check verifies the KEYS each slot names, not just start/stop. dbsdive lost its `loop start` and `loop stop` keys in a re-cut and Dive's loop and land passes went silent while this checker still reported them fine - playBlended on a missing start key is as silent as a missing group.
 needs: keytable
 needs: sk in sets[d].get(g, {})
+
+file: scripts/Flow/core/air_pose.lua
+why: water ends a skydive WITHOUT latching a landing. Swimming is never isGrounded, so without the water test the pose rode out the swim and knocked the player down when they reached the shore. The test is a cell water-level compare plus isSwimming, not a ray: AnyPhysical minus Water EXCLUDES water from a ray, which is the opposite of detecting it.
+needs: function AirPose.inWater()
+needs: types.Actor.isSwimming
+needs: cell.waterLevel
+
+file: scripts/Flow/states/airborne.lua
+why: a botch that ends in water owes nothing. Left set, the flag sat waiting and stumbled the player on reaching land, long after the manoeuvre.
+needs: AirPose.inWater()
+needs: skydiveTried = true
+
+file: scripts/Flow/core/air_pose.lua
+why: pose() is keyed on what was actually PLAYED. Keyed on mode/phase it compared start()'s freshly set mode and a nil variant as equal, so the botched-fall pose returned before Anim.setPose and never showed.
+needs: shown == key
+
+file: scripts/Flow/states/ledge_hang.lua
+why: hang actions take a jump PRESS. The grab is made with jump held, so reading held jump chained grab -> Shimmy -> WallBoost on the next strafe, and auto-mantled 0.3s after every grab.
+needs: inputData.jumpPressed
+needs: not-present inputData.jump and
+
+file: scripts/Flow/states/shimmy.lua
+why: WallBoost fires on a jump PRESS, for the same held-jump chain as LedgeHang.
+needs: inputData.jumpPressed
+
+file: scripts/Flow/states/ledge_hang.lua
+why: no lip means no hang. Without the refusal the player hung in mid-air under Levitate with nothing to climb or shimmy along.
+needs: if d.interaction ~= "LedgeHang" or not d.targetPos then return nil end
+
+file: scripts/Flow/states/mantle.lua
+why: Mantle paid fatigue twice - SkillCheck's cost plus a private 20 x encumbrance that ignored the Fatigue Cost setting. One cost model, in skill_check.lua.
+needs: not-present applyFatigueCost
+
+file: scripts/Flow/states/idle.lua
+why: no fatigue gate on ground moves. `fat > 5` / `fat > 10` blocked Vault and Mantle on a low bar, contradicting skill_check.lua - exhaustion lowers the check, it never takes the move away.
+needs: not-present fatigue(
+
+file: scripts/Flow/states/roll.lua
+why: the roll's protection is an ACROBATICS bonus, because Acrobatics is what the engine's fall-damage formula reads. v0.83 buffed Agility, which fall damage ignores, and healed afterwards. The bonus must still be on when the engine deals the landing damage, so Roll owns it through IMPACT_WINDOW instead of Airborne dropping it on touchdown.
+needs: Owned.skill('acrobatics'
+needs: IMPACT_WINDOW
+needs: not-present agility
+
+file: scripts/Flow/states/ladder.lua
+why: Ladder sets its idle variant on entry. Without it the first clip came from pairs() order over up/down/idle.
+needs: Anim.setVariant("idle")
+
+file: scripts/Flow/main.lua
+why: sensors run on demand - only for a state whose traits list them, and only while jump is held (or debug is on), because every consumer acts on held jump. Running them unconditionally cost 3 rays a frame in the open and up to 7 plus a navmesh query facing a wall, in every state.
+needs: runSensors
+needs: Sensor.reset()
+
+file: scripts/Flow/core/sensor.lua
+why: the navmesh query is the dearest call in the sensor and only a vault uses it.
+needs: vaultHeight and nearby.findNearestNavMeshPosition
+
+file: scripts/Flow/states/wall_boost.lua
+why: the boost arc is ray-checked player-side before launch. The backend moves by teleport and cannot raycast, so the unchecked arc passed through ceilings and overhangs.
+needs: firstHit
+needs: GRAVITY = 627.2
+
+file: scripts/Flow/global/flow_amf_backend.lua
+why: gravity is the engine's, 8.96 m/s2 x 69.99 units/m. 9.81 x 400 was 6.3x stronger, so every hand-off back to physics jolted.
+needs: GRAVITY = 627.2
+needs: not-present M_TO_UNITS
+
+file: scripts/Flow/states/ladder.lua
+why: the climb re-checks the ladder and the headroom every frame. Without them a wall continuing past the ladder was climbed forever, and the teleport climb went through ceilings.
+needs: ladderAhead(pos)
+needs: Body.height()
+
+file: scripts/Flow/core/air_pose.lua
+why: in a dry cell `cell.hasWater and cell.waterLevel` is false, not nil. Tested with `~= nil`, it reached `position.z <= false` and threw on every airborne frame in a waterless interior.
+needs: if not (cell and cell.hasWater and cell.waterLevel) then return false end
+
+file: scripts/Flow/core/skill_check.lua
+why: Mantle's fatigue is 8 (8-16 with load), a deliberate cut. v0.83 effectively charged 26-46 (SkillCheck's 6 plus a private 20 x (1 + load)); the single-model equivalent would be ~23, and v0.84's 20 was close to it. 8 was chosen so chained mantles stay out of WallBoost's botch band. Pinned because it is a balance decision; a retune should edit this record, not delete it.
+needs: Mantle    = { difficulty = 18, fatigue = 8 },
+
+file: scripts/Flow/main.lua
+why: the sensor gate keeps its debugOn term so the HUD stays live, which means debug mode changes DETECTION and not just display. tools/check_sensors.py is what stops a read drifting outside the gate, where it would work with the HUD on and see a reset table in play.
+needs: intents.jump or debugOn
+
+file: scripts/Flow/core/state_manager.lua
+why: init validates traits because setState indexes it unguarded for the anim mode. BaseState.new defaults it, so only a hand-rolled module can be missing it - and that crashed the transition instead of warning at registration like the name check does.
+needs: type(module.traits) == "table"
+
+file: tools/check_handlers.py
+why: `then` is NOT a block opener. Counting it as one meant an if/elseif chain inside the FIRST handler was two `then` against one `end`, the depth never returned to 1, and every key after it was invisible - a planted UiModeChanged behind an elseif went unreported, which is the exact mistake this checker exists to catch.
+needs: OPENERS = ("function", "if", "for", "while", "repeat")
+needs: not-present if w in ("do", "then", "repeat") and prev_ok
+
+file: tools/check_sensors.py
+why: same block-structure rule, same reason. canEnter's span is found by matching openers against end/until, and Mantle's canEnter uses elseif - counting `then` made the span swallow the rest of the file and excused every read in it.
+needs: OPENERS = ('function', 'if', 'for', 'while', 'repeat')
+needs: pending_do

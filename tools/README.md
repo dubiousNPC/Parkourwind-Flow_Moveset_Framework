@@ -1,11 +1,12 @@
 # tools/
 
-Six mechanical checks. None of them needs OpenMW, a Lua interpreter or a
+Seven mechanical checks. None of them needs OpenMW, a Lua interpreter or a
 network connection — they are Python 3 and the mod's own source.
 
 ```sh
 python3 tools/check_syntax.py .
 python3 tools/check_requires.py .
+python3 tools/check_sensors.py .
 python3 tools/check_context.py . /path/to/Cod3x
 python3 tools/check_handlers.py .
 python3 tools/check_anims.py .
@@ -17,6 +18,7 @@ All of them exit 0 when clean and 1 when they find something, so they chain:
 ```sh
 python3 tools/check_syntax.py . && \
 python3 tools/check_requires.py . && \
+python3 tools/check_sensors.py . && \
 python3 tools/check_context.py . ../Cod3x && \
 python3 tools/check_handlers.py . && \
 python3 tools/check_anims.py . && \
@@ -52,6 +54,15 @@ six while `playerAnim` randomised between it and `pwwalljump1`, and shimmy keyed
 clips and a present `pwladderdwn` must not excuse a missing `pwladderup`. Text
 keys are read length-prefixed; a regex sweep runs past one string's length
 prefix into the next and invents keys that do not exist.
+
+**check_sensors.py** — sensors are demand-gated: `Sensor.data` is only fresh
+for a state whose `traits.sensors` lists it, on a frame where jump is held, **or
+in debug mode**, which runs them regardless so the HUD stays live. That last
+clause is the trap. A read placed outside those conditions works with the HUD on
+and sees a reset table in play, so the bug vanishes the moment you turn on the
+tool you would debug it with. A read inside `canEnter` is exempt: that runs
+during the offering state's frame, which is why Vault, Mantle and LedgeHang
+legitimately read sensors they never declare.
 
 **check_context.py** — OpenMW modules are restricted to certain script contexts,
 and some violations are *silent*. `require('openmw.nearby')` from the global
@@ -114,8 +125,32 @@ dangerous direction — silently passing, or crying wolf:
 - `check_context.py` read a `require` inside a *comment* as a real require, and
   so reported the global backend as violating its own context — flagging the
   very comment that exists to stop that bug returning.
+- `check_handlers.py` and the first cut of `check_sensors.py` counted `then` as
+  a block opener, so an `if a then … elseif b then … end` was two `then`
+  against one `end` and the depth never came back. In `check_handlers.py` that
+  made every key after the first such handler invisible: a planted
+  `UiModeChanged` under `engineHandlers` behind an `elseif` went unreported —
+  the exact mistake the checker was written for. `function`, `if`, `for`,
+  `while` and `repeat` each take one `end`; `then`, `else` and `elseif` take
+  none, and a `do` is only an opener when no `for`/`while` already counted it.
+  Both were found by planting the bug, not by reading the code.
 
 The fixtures for all three are cheap to recreate; the negative cases that matter
 are a missing `end`, an extra `end`, an unterminated string and long comment, an
 unclosed paren, a require from the wrong context, a require mentioned only in a
 comment, a marker satisfied only by a comment, and a renamed constant.
+
+## sim/ - behaviour, not text
+
+```sh
+python3 tools/sim/run_lua.py tools/sim/test_fsm.lua .
+```
+
+Loads the real `main.lua` and `global/flow_amf_backend.lua` against mock
+`openmw.*` modules: a box world with a ray caster, simple gravity, a clock, and
+the backend's events delivered in-process. 45 scenarios cover sensor cost,
+Vault/Mantle and their refusals, the hang/shimmy/boost chain, WallBoost under
+an overhang, the Acrobatics roll, the botched fall, fatigue, the ladder, and
+standing down. Needs the system `liblua5.4` (driven through ctypes), not an
+interpreter. The mock is deliberately crude - it proves the state machine and
+the holds, not how a move feels.

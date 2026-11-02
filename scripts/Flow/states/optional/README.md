@@ -10,6 +10,12 @@ otherwise lost the moment a file stops being guarded by `tools/regressions.txt`.
 | `dive_pose.lua` | parked in v0.82; a stub, not working code |
 | `wall_run.lua` | never shipped; needs its own side-scan |
 
+**All three predate the v0.84 FSM** (see the main README's *Writing a state*).
+They still take `I.Controls` overrides and Levitate themselves and refuse by
+setting `self.abort` inside `enter`. Porting one means: move those holds into
+its `traits`, move every refusal into `canEnter`, and take its inputs as a
+payload instead of a module-level setter.
+
 ---
 
 ## WallJump — parked in v0.82
@@ -20,15 +26,13 @@ how it fits the moveset, not because it was broken.
 
 **To bring it back:**
 
-1. **main.lua** — `require('scripts/Flow/states/optional/wall_jump')`, add it to
-   `REGISTERED_STATES`, and add `WallJump = true` to `OVERRIDE_STATES`. It holds
-   a movement override for its whole duration; a state holding one without being
-   listed there has it released by the per-tick safety net on the next frame,
-   silently.
+1. **main.lua** — `require('scripts/Flow/states/optional/wall_jump')` and add it
+   to `REGISTERED_STATES`. Its movement override and Levitate become traits
+   (`overrides = "movement", suspend = true, anim = "oneshot"`).
 
 2. **states/airborne.lua** — the rung below LedgeHang, driven by a jump **edge**
    rather than held jump, so the three rungs above get first refusal on the same
-   frame. It needs back: the `jumpEdge` flag set in the Jump trigger handler
+   frame: `tryAny(RUNGS)` first, then WallJump on the press. It needs back: the `jumpEdge` flag set in the Jump trigger handler
    when forward is held; `WALL_JUMP_WINDOW = 0.70`; `WALL_JUMP_COOLDOWN = 1.2`;
    `WALL_CONTACT_MARGIN = 18.0`; `WALL_CONTACT_HEIGHT = 70.0`; the
    `WALL_RAY_OPTS` ray (World + Door, **no HeightMap** — terrain slopes read as
@@ -53,7 +57,7 @@ how it fits the moveset, not because it was broken.
            startKey = "start", stopKey = "stop",
        },
 
-   plus `WallJump = true` in `ONE_SHOT_STATES`. The group is `pwwalljump1`
+   (one-shot comes from its `anim` trait). The group is `pwwalljump1`
    **with the digit**; a bare `pwwalljump` exists in no shipped set, and a
    full-body blend mask over a missing group is the T-pose. Clips are played at
    speed 1 because they were authored to the move — the clip has been re-cut
@@ -84,10 +88,9 @@ call, not a functionality one.
 **To bring it back:**
 
 1. **main.lua** — `require('scripts/Flow/states/optional/wall_run')`, add it to
-   `REGISTERED_STATES`, and alongside `SensorExt.updateLedgeHang(...)` add
-   `SensorExt.updateWallRun(dt, InputManager.intents, EngineSync.data)`. Worth
-   checking whether it should also run outside the Idle throttle, as the rest of
-   the pipeline does.
+   `REGISTERED_STATES`, and add a `wallRun` sensor to `runSensors` that calls
+   `SensorExt.updateWallRun(dt, intents, EngineSync.data)` when the active
+   state's `sensors` trait asks for it.
 
 2. **states/airborne.lua** — a check against `SensorExt.data.wallRun.side`.
 

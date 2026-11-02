@@ -4,13 +4,15 @@ local BaseState = require('scripts/Flow/states/base_state')
 local SkillCheck = require('scripts/Flow/core/skill_check')
 local core = require('openmw.core')
 local mwSelf = require('openmw.self')
-local I = require('openmw.interfaces')
 local util = require('openmw.util')
 local nearby = require('openmw.nearby')
 local Sensor = require('scripts/Flow/core/sensor')
-local EngineSync = require('scripts/Flow/core/engine_sync')
+local Geom = require('scripts/Flow/core/geom')
+local Refusal = require('scripts/Flow/core/refusal')
 
-local VaultState = BaseState.new("Vault")
+local VaultState = BaseState.new("Vault", {
+    overrides = "all", teleports = true, anim = "oneshot",
+})
 
 local PROFILE_RAY_OPTS = {
     ignore = mwSelf,
@@ -23,7 +25,7 @@ local DISTANCE_SCALING = 500.0
 local PROFILE_STEPS = 5             -- rays along the trajectory
 local PEAK_SAFETY_CLEARANCE = 55.0  -- feet clearance over the obstacle peak
 local AIR_DROP_HEIGHT = 45.0        -- release height above the target
-local MIN_APEX_RISE = 80.0         -- minimum apex above the start
+local MIN_APEX_RISE = 80.0          -- minimum apex above the start
 
 local PROFILE_SCAN_CEILING = 600.0  -- how far above the player to start each probe
 local PROFILE_SCAN_FLOOR = 50.0     -- how far below the player to end it
@@ -40,150 +42,91 @@ local APEX_DIST_REFERENCE = 120.0 -- distance at which no extra lift is added
 local APEX_DIST_GAIN = 0.12       -- extra lift per unit beyond that
 local APEX_DIST_BONUS_MAX = 30.0  -- hard ceiling on the extra lift
 
-local BLOCK_DURATION = 0.35
+local COMPLETION_GRACE = 0.06
 
-local BLOCK_RETRY_RADIUS = 40.0
-local blockedPos = nil
-local blockedUntil = 0
+local refusal = Refusal.new(0.35, 40.0)
 
 local timeInState = 0
 local estimatedDuration = 0.5
 
-function VaultState.isBlocked(candidate)
-    if core.getRealTime() >= blockedUntil then return false end
-    if not (blockedPos and candidate) then return true end
-    return (candidate - blockedPos):length() < BLOCK_RETRY_RADIUS
-end
-
-function VaultState:enter(syncData)
-    self.abort = false
-    if Sensor.data.interaction ~= "Vault" or not Sensor.data.targetPos then
-        self.abort = true
-        return
-    end
-
-    local DebugHUD = require('scripts/Flow/core/debug_hud')
-    DebugHUD.update("Vault", Sensor.getDebugString(), "VAULT TRIGGERED")
+-- Plans the arc from the Sensor's target, or refuses. Nothing is committed.
+function VaultState:canEnter()
+    local rawLandPos = Sensor.data.targetPos
+    if Sensor.data.interaction ~= "Vault" or not rawLandPos then return nil end
+    if refusal:blocks(rawLandPos) then return nil end
 
     local startPos = mwSelf.position
-    local rawLandPos = Sensor.data.targetPos
 
     -- Profile the path for its highest point, then release above the landing.
     local highestZ = math.max(startPos.z, rawLandPos.z)
     local pathVec = rawLandPos - startPos
-
     for i = 1, PROFILE_STEPS do
-        local t = i / (PROFILE_STEPS + 1)
-        local scanXY = startPos + (pathVec * t)
+        local scanXY = startPos + (pathVec * (i / (PROFILE_STEPS + 1)))
         local origin = util.vector3(scanXY.x, scanXY.y, startPos.z + PROFILE_SCAN_CEILING)
         local dest = util.vector3(scanXY.x, scanXY.y, startPos.z - PROFILE_SCAN_FLOOR)
         local res = nearby.castRay(origin, dest, PROFILE_RAY_OPTS)
-        if res.hit and res.hitPos.z > highestZ then
-            highestZ = res.hitPos.z
-        end
+        if res.hit and res.hitPos.z > highestZ then highestZ = res.hitPos.z end
     end
 
     if (highestZ - startPos.z) > MAX_VAULTABLE_RISE then
-        blockedPos = Sensor.data.targetPos
-        blockedUntil = core.getRealTime() + BLOCK_DURATION
-        self.abort = true
-        return
+        refusal:block(rawLandPos); return nil
     end
 
+    -- apexPos is a Bezier CONTROL point; see README.
     local requiredPeak = highestZ + PEAK_SAFETY_CLEARANCE
     local apexZ = 2 * requiredPeak - 0.5 * startPos.z - 0.5 * rawLandPos.z
     apexZ = math.max(apexZ, startPos.z + MIN_APEX_RISE)
 
-    local spanXY = util.vector3(rawLandPos.x - startPos.x, rawLandPos.y - startPos.y, 0):length()
+    local spanXY = util.vector3(pathVec.x, pathVec.y, 0):length()
     if spanXY > APEX_DIST_REFERENCE then
-        local bonus = math.min(APEX_DIST_BONUS_MAX,
-                               (spanXY - APEX_DIST_REFERENCE) * APEX_DIST_GAIN)
-        apexZ = apexZ + bonus
+        apexZ = apexZ + math.min(APEX_DIST_BONUS_MAX, (spanXY - APEX_DIST_REFERENCE) * APEX_DIST_GAIN)
     end
 
     local midPoint = (startPos + rawLandPos) * 0.5
-    local apexPos = util.vector3(midPoint.x, midPoint.y, apexZ)
 
     local probeZ = startPos.z + (apexZ - startPos.z) * CLEARANCE_PROBE_Z
-    local probeStart = util.vector3(startPos.x, startPos.y, probeZ)
-    local probeEnd = util.vector3(rawLandPos.x, rawLandPos.y, probeZ)
-
-    if nearby.castRay(probeStart, probeEnd, PROFILE_RAY_OPTS).hit then
-        blockedPos = Sensor.data.targetPos
-        blockedUntil = core.getRealTime() + BLOCK_DURATION
-        self.abort = true
-        return
+    if nearby.castRay(util.vector3(startPos.x, startPos.y, probeZ),
+                      util.vector3(rawLandPos.x, rawLandPos.y, probeZ), PROFILE_RAY_OPTS).hit then
+        refusal:block(rawLandPos); return nil
     end
 
-    local destTop = rawLandPos + util.vector3(0, 0, DEST_HEAD_PROBE)
-    local destFloorEnd = rawLandPos - util.vector3(0, 0, DEST_FLOOR_PROBE)
-
-    local floorRes = nearby.castRay(destTop, destFloorEnd, PROFILE_RAY_OPTS)
-    if not floorRes.hit then
-        blockedPos = Sensor.data.targetPos
-        blockedUntil = core.getRealTime() + BLOCK_DURATION
-        self.abort = true
-        return
+    if not Geom.standable(rawLandPos, DEST_HEAD_PROBE, DEST_FLOOR_PROBE, DEST_FLOOR_TOLERANCE,
+                          PROFILE_RAY_OPTS) then
+        refusal:block(rawLandPos); return nil
     end
 
-    if (rawLandPos.z - floorRes.hitPos.z) > DEST_FLOOR_TOLERANCE then
-        blockedPos = Sensor.data.targetPos
-        blockedUntil = core.getRealTime() + BLOCK_DURATION
-        self.abort = true
-        return
-    end
+    return {
+        startPos = startPos,
+        apexPos = util.vector3(midPoint.x, midPoint.y, apexZ),
+        landPos = rawLandPos + util.vector3(0, 0, AIR_DROP_HEIGHT),
+        duration = math.max(0.25, VAULT_BASE_DURATION + (pathVec:length() / DISTANCE_SCALING)),
+    }
+end
 
-    local headRes = nearby.castRay(rawLandPos, destTop, PROFILE_RAY_OPTS)
-    if headRes.hit then
-        blockedPos = Sensor.data.targetPos
-        blockedUntil = core.getRealTime() + BLOCK_DURATION
-        self.abort = true
-        return
-    end
-
-    local safeLandPos = rawLandPos + util.vector3(0, 0, AIR_DROP_HEIGHT)
-
-    local dist = (rawLandPos - startPos):length()
-    estimatedDuration = math.max(0.25, VAULT_BASE_DURATION + (dist / DISTANCE_SCALING))
-
+function VaultState:enter(plan)
     SkillCheck.attempt("Vault")
-
-    I.Controls.overrideMovementControls(true)
-    I.Controls.overrideCombatControls(true)
-    EngineSync.suspendTeleportDetection(true)
-
+    estimatedDuration = plan.duration
+    timeInState = 0
     core.sendGlobalEvent('FLOW_Vault_Start', {
         actor = mwSelf,
-        startPos = startPos,
-        apexPos = apexPos,
-        landPos = safeLandPos,
-        duration = estimatedDuration
+        startPos = plan.startPos,
+        apexPos = plan.apexPos,
+        landPos = plan.landPos,
+        duration = plan.duration,
     })
-
-    timeInState = 0
-    self.abort = false
 end
 
 function VaultState:exit()
-    I.Controls.overrideMovementControls(false)
-    I.Controls.overrideCombatControls(false)
-    EngineSync.suspendTeleportDetection(false)
     core.sendGlobalEvent('FLOW_Vault_Cancel', { actor = mwSelf })
 end
 
-local COMPLETION_GRACE = 0.06
-
 function VaultState:update(dt, syncData, inputData)
-    if self.abort then return "Airborne" end
-
     timeInState = timeInState + dt
 
     if timeInState >= estimatedDuration + COMPLETION_GRACE then
         if SkillCheck.botched() then return "Stumble" end
         return "Idle"
     end
-
-    return nil
 end
 
 return VaultState

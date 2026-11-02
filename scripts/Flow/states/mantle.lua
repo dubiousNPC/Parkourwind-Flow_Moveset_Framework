@@ -2,18 +2,19 @@
 -- Mantle. Climbs onto a waist-to-head surface.
 local BaseState = require('scripts/Flow/states/base_state')
 local SkillCheck = require('scripts/Flow/core/skill_check')
-local types = require('openmw.types')
 local mwSelf = require('openmw.self')
 local util = require('openmw.util')
-local I = require('openmw.interfaces')
 local core = require('openmw.core')
 local camera = require('openmw.camera')
 local nearby = require('openmw.nearby')
 local Settings = require('scripts/Flow/settings')
 local Sensor = require('scripts/Flow/core/sensor')
-local EngineSync = require('scripts/Flow/core/engine_sync')
+local Geom = require('scripts/Flow/core/geom')
+local Refusal = require('scripts/Flow/core/refusal')
 
-local MantleState = BaseState.new("Mantle")
+local MantleState = BaseState.new("Mantle", {
+    overrides = "all", teleports = true, anim = "oneshot",
+})
 
 local DEST_HEAD_PROBE = 90.0
 local DEST_FLOOR_PROBE = 200.0
@@ -33,146 +34,70 @@ local COMPLETION_GRACE = 0.06
 local CAM_PITCH_DIP = 5.0    -- degrees
 local CAM_ROLL_MAG = 2.0     -- degrees
 
-local targetPos = nil
+local refusal = Refusal.new(0.35, 40.0)
+
 local timeInState = 0
 local totalDuration = 0
 
-local function applyFatigueCost()
-    local encumb = types.Actor.getEncumbrance(mwSelf)
-    local cap = types.Actor.getCapacity(mwSelf)
-    local ratio = 0
-    if cap > 0 then ratio = encumb / cap end
-    local cost = 20.0 * (1.0 + ratio)
-    local dyn = types.Actor.stats.dynamic.fatigue(mwSelf)
-    dyn.current = math.max(0, dyn.current - cost)
+local function refuse(ledge, why)
+    refusal:block(ledge)
+    if Settings.debugMode() then print("[FLOW][mantle] refused: " .. why) end
+    return nil
 end
 
-local BLOCK_DURATION = 0.35
-local BLOCK_RETRY_RADIUS = 40.0
-local blockedUntil = 0
-local blockedPos = nil
-
-function MantleState.isBlocked(candidate)
-    if core.getRealTime() >= blockedUntil then return false end
-    if not (blockedPos and candidate) then return true end
-    return (candidate - blockedPos):length() < BLOCK_RETRY_RADIUS
-end
-
-local function refuse(state)
-    blockedPos = Sensor.data.targetPos
-    blockedUntil = core.getRealTime() + BLOCK_DURATION
-    state.abort = true
-end
-
-local destinationVouched = false
-
-function MantleState.vouchDestination()
-    destinationVouched = true
-end
-
-function MantleState:enter(syncData)
-    self.abort = false
-    if Sensor.data.interaction ~= "Mantle" then
-        if Settings.debugMode() then
-            print("[FLOW][mantle] refused: no Mantle target from sensor")
-        end
-        self.abort = true
-        return
+-- payload: { ledge = pos, vouched = bool } from LedgeHang, else the Sensor.
+-- A vouched ledge was already validated as a hang and skips the destination
+-- probes.
+function MantleState:canEnter(payload)
+    local ledge, vouched
+    if payload and payload.ledge then
+        ledge, vouched = payload.ledge, payload.vouched
+    elseif Sensor.data.interaction == "Mantle" then
+        ledge = Sensor.data.targetPos
     end
-
-    local DebugHUD = require('scripts/Flow/core/debug_hud')
-    DebugHUD.update("Mantle", Sensor.getDebugString(), "MANTLE TRIGGERED")
-
-    I.Controls.overrideMovementControls(true)
-    I.Controls.overrideCombatControls(true)
-    EngineSync.suspendTeleportDetection(true)
+    if not ledge then return nil end
+    if not vouched and refusal:blocks(ledge) then return nil end
 
     local startPos = mwSelf.position
-    local rawLedge = Sensor.data.targetPos
+    local pushDir = Geom.flat(ledge - startPos) or Geom.forward(mwSelf)
+    local targetPos = ledge + util.vector3(0, 0, LANDING_BUFFER) + pushDir * LEDGE_PUSH_IN
 
-    if not rawLedge then
-        if Settings.debugMode() then
-            print("[FLOW][mantle] refused: sensor target missing")
-        end
-        self.abort = true
-        return
+    if targetPos.z <= startPos.z then return refuse(ledge, "target at or below start height") end
+
+    if not vouched then
+        local ok, why = Geom.standable(targetPos, DEST_HEAD_PROBE, DEST_FLOOR_PROBE,
+                                       DEST_FLOOR_TOLERANCE, DEST_RAY_OPTS)
+        if not ok then return refuse(ledge, why) end
     end
 
-    local toLedge = rawLedge - startPos
-    local pushDir = util.vector3(toLedge.x, toLedge.y, 0)
-    if pushDir:length() > 1.0 then
-        pushDir = pushDir:normalize()
-    else
-        local yaw = mwSelf.rotation:getYaw()
-        pushDir = util.transform.rotateZ(yaw):apply(util.vector3(0, 1, 0))
-    end
+    return {
+        startPos = startPos,
+        risePos = util.vector3(startPos.x, startPos.y, targetPos.z),
+        targetPos = targetPos,
+        duration = math.max(MIN_DURATION, (targetPos.z - startPos.z) / CLIMB_SPEED_UNITS_PER_SEC),
+    }
+end
 
-    targetPos = rawLedge + util.vector3(0, 0, LANDING_BUFFER) + pushDir * LEDGE_PUSH_IN
-
-    if targetPos.z <= startPos.z then
-        if Settings.debugMode() then
-            print("[FLOW][mantle] refused: target at or below start height")
-        end
-        refuse(self)
-        return
-    end
-
-    -- A vouched ledge (from LedgeHang) skips the destination probes.
-    if destinationVouched then
-        destinationVouched = false
-    else
-        local destTop = targetPos + util.vector3(0, 0, DEST_HEAD_PROBE)
-        local floorRes = nearby.castRay(destTop, targetPos - util.vector3(0, 0, DEST_FLOOR_PROBE),
-                                        DEST_RAY_OPTS)
-        if not floorRes.hit or (targetPos.z - floorRes.hitPos.z) > DEST_FLOOR_TOLERANCE then
-            if Settings.debugMode() then
-                print("[FLOW][mantle] refused: no floor under destination")
-            end
-            refuse(self)
-            return
-        end
-        if nearby.castRay(targetPos, destTop, DEST_RAY_OPTS).hit then
-            if Settings.debugMode() then
-                print("[FLOW][mantle] refused: no headroom above destination")
-            end
-            refuse(self)
-            return
-        end
-    end
-
-    local heightDiff = math.abs(targetPos.z - startPos.z)
-    totalDuration = math.max(MIN_DURATION, heightDiff / CLIMB_SPEED_UNITS_PER_SEC)
-
+function MantleState:enter(plan)
     SkillCheck.attempt("Mantle")
-
-    local risePos = util.vector3(startPos.x, startPos.y, targetPos.z)
-
+    totalDuration = plan.duration
+    timeInState = 0
     core.sendGlobalEvent('FLOW_Mantle_Start', {
         actor = mwSelf,
-        startPos = startPos,
-        risePos = risePos,
-        targetPos = targetPos,
-        duration = totalDuration,
+        startPos = plan.startPos,
+        risePos = plan.risePos,
+        targetPos = plan.targetPos,
+        duration = plan.duration,
     })
-
-    applyFatigueCost()
-    timeInState = 0
-    self.abort = false
 end
 
 function MantleState:exit()
-    I.Controls.overrideMovementControls(false)
-    I.Controls.overrideCombatControls(false)
-    EngineSync.suspendTeleportDetection(false)
     core.sendGlobalEvent('FLOW_Mantle_Cancel', { actor = mwSelf })
-
     camera.setExtraPitch(0)
     camera.setExtraRoll(0)
 end
 
 function MantleState:update(dt, syncData, inputData)
-    if self.abort then return "Airborne" end
-
     timeInState = timeInState + dt
 
     -- Camera heave: 0 -> 1 -> 0 over the climb.
@@ -191,8 +116,6 @@ function MantleState:update(dt, syncData, inputData)
     if timeInState > TIMEOUT_MAX then
         return "Airborne"
     end
-
-    return nil
 end
 
 return MantleState

@@ -18,9 +18,13 @@ local FATIGUE_TERM_SPAN = 0.50
 local EXEMPT = { LedgeHang = true, Roll = true, Ladder = true, Skydive = true }
 
 -- Difficulty is what `chance` must beat; the threshold setting scales it.
+-- Mantle's 8 (8-16 with load) is a deliberate CUT, not a carry-over. v0.83
+-- charged 6 here plus a private 20 x (1 + load) in mantle.lua: 26 unloaded,
+-- 46 at full load. Reproducing that under the single model would be ~23.
+-- 8 keeps chained mantles out of WallBoost's botch band.
 local MOVES = {
     Vault     = { difficulty = 8,  fatigue = 3 },
-    Mantle    = { difficulty = 18, fatigue = 6 },
+    Mantle    = { difficulty = 18, fatigue = 8 },
     Shimmy    = { difficulty = 15, fatigue = 2 },
     WallBoost = { difficulty = 35, fatigue = 8 },
 }
@@ -46,10 +50,17 @@ function SkillCheck.difficulty(moveName)
     return move.difficulty * Settings.skillDifficulty()
 end
 
+-- Load makes every move dearer: a full pack doubles the cost.
+local function encumbranceFactor()
+    local cap = types.Actor.getCapacity(mwSelf)
+    if cap <= 0 then return 1.0 end
+    return 1.0 + math.min(1.0, types.Actor.getEncumbrance(mwSelf) / cap)
+end
+
 function SkillCheck.fatigueCost(moveName)
     local move = MOVES[moveName]
     if not move then return 0 end
-    return move.fatigue * Settings.staminaScale()
+    return move.fatigue * encumbranceFactor() * Settings.staminaScale()
 end
 
 -- Exhaustion is already in the formula, through the fatigue term. There is no
