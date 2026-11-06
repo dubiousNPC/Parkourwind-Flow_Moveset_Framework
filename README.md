@@ -230,8 +230,12 @@ stays active and keeps resolving the priority ladder, so a skydive can still be
 interrupted by a vault, a mantle or a ledge. Nothing in that file moves the
 actor: no teleport, no lerp, no backend event, and a marker enforces that.
 
-**Skydive.** Arms by itself after 1.2s airborne with 1200 units of air below,
-once per airborne period. Jump controls stay native throughout and **a jump
+**Skydive.** Arms by itself after 1.2s airborne, while **falling** faster than
+300 u/s, with 1200 units of air below, once per airborne period. Not grounded
+is not falling: a Levitate spell, a hookshot hang, a rider placed every frame
+are all airborne and still, and before v0.86 each of them skydived 1.2s in and
+landed as a knockdown. Until the fall starts the arm stays open rather than
+spent, so a levitation that ends over a drop still skydives. Jump controls stay native throughout and **a jump
 press cancels it**. The only mechanical effect is +250 Acrobatics and +150 Jump,
 through `Owned`, so a save taken mid-skydive is undone on load.
 
@@ -317,6 +321,55 @@ function Vault:update(dt, sync, input) return "Idle", payload end
 - **Sensors are opt-in.** `main.lua` runs `Sensor` / `SensorExt` only for the
   active state's `sensors` trait and only while jump is held (always in debug
   mode). Anything else reads a cleared result.
+
+## Sharing the player with other mods
+
+Mods that take hold of the player (a mount, a boat's helm, a caravan, a
+grappling hook) leave the actor **not grounded for as long as they hold it**,
+because they place it every frame and the engine skips a placed actor's physics
+step. FLOW reads not grounded as a jump in progress, so unasked it ran the
+airborne ladder on a rider: the mount's jump, which is the same key, grabbed a
+ledge off the saddle; a caravan passenger LedgeHung on the howdah; a falling
+mount played Skydive and landed as a knockdown; and the Jump that drops a
+hookshot hang chained into a FLOW grab.
+
+So FLOW publishes `I.Flow`, and a mod that holds the player stands it down:
+
+```lua
+if I.Flow then I.Flow.yield('MyMod') end    -- BEFORE writing the override flag
+...                                          -- the hold
+if I.Flow then I.Flow.resume('MyMod') end   -- after releasing it
+```
+
+| member | |
+|---|---|
+| `version` | `1` |
+| `yield(owner)` | stand down to Idle now, and stay there until every owner resumes |
+| `resume(owner)` | release this owner's yield; an owner that never yielded is a no-op |
+| `isYielded()` | any owner holding |
+| `getState()` | the active state's name |
+
+A script that cannot depend on the interface, a global one for example, sends
+`player:sendEvent('Flow_Yield', { owner = 'MyMod', yield = true })` and the same
+with `yield = false`.
+
+- **Yield before writing `overrideMovementControls`.** The flag is one value
+  shared by every mod. Standing down releases FLOW's own hold on it, and that
+  write has to land before the holder's, not after it.
+- **Per owner.** Two holders, such as a caravan journey begun from the saddle,
+  release in either order without releasing each other.
+- **Not saved.** Every holder re-takes the player on load through its own
+  restore path, and a stale yield would switch FLOW off for good.
+- **A jump held across the hand-over is not a request.** When the last owner
+  resumes, jump reads as released until the key is actually let go.
+- While yielded FLOW keeps `EngineSync` current, so its first frame back reads
+  the actor as it is.
+
+WhyWalk (Core, Boats, Caravans) and Hookshot ship this integration. Hookshot
+yields for the pull, swing, launch, landing and hang, but **not while
+tethered**: there the player walks, jumps and vaults freely.
+`tools/sim/test_interop.lua` emulates each of them as its source shows it
+holding the player.
 
 ## Implementation notes
 

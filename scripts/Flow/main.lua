@@ -51,6 +51,63 @@ local function standDown()
     end
 end
 
+-- ---------------------------------------------------------------------------
+-- YIELDING TO ANOTHER MOD
+-- ---------------------------------------------------------------------------
+-- Mods that take hold of the player -- a mount, a boat's helm, a caravan, a
+-- grappling hook -- leave the actor not grounded for as long as they hold it,
+-- and FLOW reads not grounded as a jump in progress. Unasked, it ran the whole
+-- airborne ladder on a rider: the mount's jump (the same key) grabbed a ledge
+-- off the saddle, a falling mount played Skydive and landed as a knockdown,
+-- a hookshot hang's releasing Jump chained into a FLOW grab.
+--
+-- So a mod that holds the player says so, and FLOW stands down to Idle and
+-- does nothing until every holder has let go:
+--
+--     if I.Flow then I.Flow.yield('MyMod') end    -- BEFORE writing the
+--     ...                                          -- override flag
+--     if I.Flow then I.Flow.resume('MyMod') end
+--
+-- ORDER MATTERS. overrideMovementControls is one flag shared by every mod.
+-- Standing down releases FLOW's own hold on it; yielding first means that
+-- write happens before the holder's, not over it.
+--
+-- Per owner, so two mods (a hookshot fired from the saddle) cannot release
+-- each other. Not saved: every holder re-takes the player on load through its
+-- own restore path, and a stale yield would switch FLOW off for good.
+--
+-- The Flow_Yield event { owner, yield } does the same for a script that cannot
+-- or will not depend on the interface (a global script, via player:sendEvent).
+local yields = {}
+local yieldCount = 0
+local resumePending = false
+
+local function yield(owner)
+    assert(owner ~= nil, "I.Flow.yield needs an owner name")
+    if yields[owner] then return end
+    yields[owner] = true
+    yieldCount = yieldCount + 1
+    if yieldCount == 1 then
+        -- Now, not next frame: the caller writes the override flag next.
+        standDown()
+        InputManager.reset()
+    end
+end
+
+local function resume(owner)
+    if owner == nil or not yields[owner] then return end
+    yields[owner] = nil
+    yieldCount = yieldCount - 1
+    -- A jump still held from the hold (the press that released a hookshot
+    -- hang, a mount's jump) is not a new request. Applied on the next update,
+    -- where input is read.
+    if yieldCount == 0 then resumePending = true end
+end
+
+local function isYielded()
+    return yieldCount > 0
+end
+
 local function onInit()
     EngineSync.init()
     StateManager.init(REGISTERED_STATES)
@@ -67,6 +124,7 @@ end
 
 local function onLoad(data)
     Owned.undo(data and data.owned)
+    yields, yieldCount, resumePending = {}, 0, false
 end
 
 -- Sensors run on demand: only for a state that reads them, and only while jump
@@ -113,7 +171,17 @@ local function onUpdate(dt)
 
     local debugOn = Settings.debugMode()
 
+    -- Ground and velocity stay current while yielded, so the first frame
+    -- after a hold ends reads the actor as it is, not as it was.
     EngineSync.update(dt)
+    if yieldCount > 0 then
+        if StateManager.getActiveStateName() ~= "Idle" then standDown() end
+        return
+    end
+    if resumePending then
+        resumePending = false
+        InputManager.latchJump()
+    end
     InputManager.update()
     runSensors(dt, StateManager.getActiveState(), InputManager.intents, debugOn)
     StateManager.update(dt, EngineSync.data, InputManager.intents)
@@ -133,6 +201,20 @@ local function onUpdate(dt)
 end
 
 return {
+    interfaceName = "Flow",
+    interface = {
+        version = 1,
+        yield = yield,
+        resume = resume,
+        isYielded = isYielded,
+        getState = function() return StateManager.getActiveStateName() end,
+    },
+    eventHandlers = {
+        Flow_Yield = function(data)
+            if type(data) ~= "table" or data.owner == nil then return end
+            if data.yield == false then resume(data.owner) else yield(data.owner) end
+        end,
+    },
     engineHandlers = {
         onInit = onInit,
         onActive = onActive,

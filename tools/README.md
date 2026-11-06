@@ -144,6 +144,7 @@ comment, a marker satisfied only by a comment, and a renamed constant.
 
 ```sh
 python3 tools/sim/run_lua.py tools/sim/test_fsm.lua .
+python3 tools/sim/run_lua.py tools/sim/test_interop.lua .
 ```
 
 Loads the real `main.lua` and `global/flow_amf_backend.lua` against mock
@@ -154,3 +155,14 @@ an overhang, the Acrobatics roll, the botched fall, fatigue, the ladder, and
 standing down. Needs the system `liblua5.4` (driven through ctypes), not an
 interpreter. The mock is deliberately crude - it proves the state machine and
 the holds, not how a move feels.
+
+`test_interop.lua` (33 checks) puts FLOW beside the mods that hold the player:
+WhyWalk mounts, Boats and Caravans, and Hookshot's hang. Each is emulated by
+what its source does, which is the override flag, Levitate, a placement every
+frame, and the Jump key. It covers `I.Flow` yields across a ride, a mount's
+cliff leap, a hand-over mid-Vault, the jump that drops a hang, and a caravan
+passenger. It also covers the Skydive's descent gate and its whole lifecycle.
+
+Both suites run under real **LuaJIT**, the engine's interpreter, as well as
+Lua 5.4: `luajit tools/sim/test_fsm.lua .`. The mock is plain Lua 5.1, and the
+two languages disagree silently on things like `math.atan(y, x)`.

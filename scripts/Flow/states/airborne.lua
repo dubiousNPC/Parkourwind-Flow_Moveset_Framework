@@ -29,6 +29,14 @@ local ROLL_MIN_AIR_TIME = 0.75
 -- Skydive arms on its own after a sustained fall, with real air below.
 local SKYDIVE_ARM_TIME = 1.2
 local SKYDIVE_CLEARANCE = 1200.0
+-- And only while actually FALLING. Not grounded is not falling: a Levitate
+-- spell, a hookshot hang, a rider or passenger placed every frame are all
+-- not grounded and still, and each skydived 1.2 s in, then landed as a
+-- knockdown. A real fall is past 400 u/s down by the time it arms (750
+-- from a standing drop, ~450 after a jump's rise), so 300 costs it nothing.
+-- Until the fall starts the arm stays open rather than being spent: a
+-- levitation that ends over a drop still gets its skydive.
+local SKYDIVE_MIN_FALL_SPEED = 300.0
 
 local armed = false
 local timeAirborne = 0
@@ -125,6 +133,7 @@ function AirborneState:update(dt, syncData, inputData)
     if not AirPose.active() and not skydiveTried and not armed
        and timeAirborne >= SKYDIVE_ARM_TIME
        and not syncData.isGrounded
+       and (syncData.verticalVelocity or 0) < -SKYDIVE_MIN_FALL_SPEED
        and Settings.stateEnabled("Skydive") then
         skydiveTried = true
         if skydiveClearance() then AirPose.startSkydive() end

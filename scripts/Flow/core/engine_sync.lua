@@ -10,6 +10,9 @@ local EngineSync = {
 
     data = {
         forwardVelocity = 0,
+        -- From position, like forwardVelocity: u/s, negative while descending.
+        -- 0 across a teleport, which is a placement, not a speed.
+        verticalVelocity = 0,
         isGrounded = true,
         groundedTime = 0,
         landings = 0,
@@ -58,7 +61,11 @@ function EngineSync.update(dt)
 
     local dx = currentPos.x - EngineSync.prevPos.x
     local dy = currentPos.y - EngineSync.prevPos.y
+    local vz = (currentPos.z - EngineSync.prevPos.z) / dt
     EngineSync.prevPos = currentPos
+
+    EngineSync.data.verticalVelocity =
+        (math.abs(vz) > EngineSync.TELEPORT_SPEED) and 0 or vz
 
     local speed = math.sqrt(dx * dx + dy * dy) / dt
     if speed > EngineSync.TELEPORT_SPEED and not EngineSync.suspended then

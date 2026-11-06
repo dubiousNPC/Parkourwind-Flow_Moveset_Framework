@@ -15,6 +15,8 @@ local InputManager = {
 }
 
 local wasJumpHeld = false
+-- Set by latchJump: jump reads as released until the key really is.
+local jumpLatched = false
 
 -- The nine possible move vectors, built once.
 local MOVE = {}
@@ -38,6 +40,9 @@ function InputManager.update()
     InputManager.intents.moveVector = MOVE[mx][my]
 
     local jumpHeld = input.isActionPressed(input.ACTION.Jump)
+    if jumpLatched then
+        if jumpHeld then jumpHeld = false else jumpLatched = false end
+    end
 
     InputManager.intents.jump = jumpHeld
     InputManager.intents.crouch = input.isActionPressed(input.ACTION.Sneak)
@@ -45,6 +50,12 @@ function InputManager.update()
     InputManager.intents.jumpPressed = jumpHeld and not wasJumpHeld
 
     wasJumpHeld = jumpHeld
+end
+
+-- A jump held across a hand-over from another mod (see main.lua, yield) is
+-- that mod's input, not a request to FLOW: ignore it until it is let go.
+function InputManager.latchJump()
+    jumpLatched = true
 end
 
 function InputManager.reset()

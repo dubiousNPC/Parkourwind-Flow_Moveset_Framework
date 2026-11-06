@@ -428,3 +428,17 @@ file: tools/check_sensors.py
 why: same block-structure rule, same reason. canEnter's span is found by matching openers against end/until, and Mantle's canEnter uses elseif - counting `then` made the span swallow the rest of the file and excused every read in it.
 needs: OPENERS = ('function', 'if', 'for', 'while', 'repeat')
 needs: pending_do
+
+file: scripts/Flow/main.lua
+why: mods that hold the player (WhyWalk mounts, boats, caravans; Hookshot pull, swing, hang) leave it not grounded, and FLOW ran the airborne ladder on it: a mount's jump grabbed a ledge off the saddle, a caravan passenger LedgeHung on the howdah, a falling mount played Skydive and landed as a knockdown. I.Flow.yield/resume stands FLOW down for the hold. tools/sim/test_interop.lua.
+needs: interfaceName = "Flow"
+needs: if yieldCount > 0 then
+needs: Flow_Yield
+
+file: scripts/Flow/core/input.lua
+why: the Jump that released a Hookshot hang was still held when FLOW resumed and chained straight into a FLOW ledge grab. A held jump across a hand-over reads released until the key is let go.
+needs: jumpLatched
+
+file: scripts/Flow/states/airborne.lua
+why: Skydive armed on not-grounded alone, so a Levitate spell or any pinned actor hovering 1.2 s over a drop skydived and then landed as a knockdown. It needs a real descent.
+needs: SKYDIVE_MIN_FALL_SPEED

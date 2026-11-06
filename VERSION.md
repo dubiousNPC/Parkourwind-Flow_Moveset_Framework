@@ -1,4 +1,39 @@
-# Flow - Community Moveset Framework v0.85
+# Flow - Community Moveset Framework v0.86
+
+## v0.86
+
+Tested against WhyWalk (Core, Boats, Caravans) and Hookshot on the same player.
+
+### Interop
+- **`I.Flow` interface and `Flow_Yield` event, new** (README, Sharing the
+  player). Mods that hold the player left it not grounded, and FLOW ran the
+  airborne ladder on it:
+  - a mount's jump, on the same key, grabbed a ledge off the saddle;
+  - a caravan passenger pressing Jump at the howdah went to LedgeHang, which
+    levitates and snaps the player while Caravans pins them;
+  - a mount falling off a cliff played Skydive on the rider and landed as a
+    knockdown;
+  - the Jump that drops a Hookshot hang chained into a FLOW ledge grab.
+
+  FLOW now stands down to Idle while any owner yields.
+- A jump held across a hand-over reads as released until it is let go
+  (`InputManager.latchJump`).
+
+### Fixes
+- **Skydive needs a real fall** (`SKYDIVE_MIN_FALL_SPEED`, 300 u/s). It armed
+  on not-grounded alone, so a Levitate spell hovering 1.2s over a drop
+  skydived, and the knockdown followed on landing. This is FLOW's own bug,
+  separate from interop. `EngineSync` now publishes `verticalVelocity`.
+
+### Tests
+- **`tools/sim/test_interop.lua`, new, 33 checks.** Each holder is emulated by
+  what its source does to the player (override, Levitate, per-frame placement,
+  Jump). Against v0.85, 11 of them failed.
+- It also covers the whole Skydive lifecycle, which `test_fsm` never did: arm,
+  windup, release buffs, the knockdown landing, and the buffs removed.
+- `mock.lua`: `M.notGrounded` (a placed actor), `M.I`, and the interface
+  published as `I.Flow`.
+
 
 ## v0.85
 

@@ -189,6 +189,9 @@ pre['openmw.animation'] = function() return {
 } end
 
 local function grounded()
+    -- A teleported actor skips its physics step, so the engine never reports
+    -- one pinned every frame as on the ground (WhyWalk caravans_player notes).
+    if M.notGrounded then return false end
     local below = castRay(player.position + v3(0, 0, 2), player.position - v3(0, 0, 2))
     M.rays = M.rays - 1
     return below.hit and player.vz <= 0
@@ -255,6 +258,7 @@ local I = {
     },
 }
 pre['openmw.interfaces'] = function() return I end
+M.I = I
 
 ---------------------------------------------------------------- load
 local function loadfileOr(path)
@@ -262,6 +266,8 @@ local function loadfileOr(path)
     return chunk()
 end
 M.main = loadfileOr("scripts/Flow/main.lua")
+-- What another script on the player sees as I.Flow.
+if M.main.interfaceName then I[M.main.interfaceName] = M.main.interface end
 M.backend = loadfileOr("scripts/Flow/global/flow_amf_backend.lua")
 M.SM = require('scripts/Flow/core/state_manager')
 M.Sensor = require('scripts/Flow/core/sensor')
