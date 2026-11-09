@@ -94,11 +94,12 @@ call, not a functionality one.
 
 2. **states/airborne.lua** — a check against `SensorExt.data.wallRun.side`.
 
-3. **core/engine_sync.lua** — `wall_run.lua` reads `syncData.verticalVelocity`,
-   which EngineSync does not provide. Add it before re-enabling.
+3. **core/engine_sync.lua** — `wall_run.lua` reads `syncData.verticalVelocity`.
+   EngineSync provides it since v0.86 (u/s, positive up, the same meaning
+   WallRun's entry arc assumes), so this one is done.
 
-4. **It will raise as written.** `wall_run.lua` calls `mwSelf:teleport(...)`
-   from a player script, and `teleport` is global-only — it has to go through
-   `global/flow_amf_backend.lua` like every other move. It also bypasses
-   `core/owned.lua` for its Levitate, so a save mid-run strands the effect, and
-   its `DEBUG_MODE = true` prints regardless of the debug setting.
+4. **The move itself.** Since v0.86 it snaps through `FLOW_SnapTo` like every
+   other state; it called `mwSelf:teleport(...)`, which is global-only and
+   would have raised every frame. Still open: it bypasses `core/owned.lua` for
+   its Levitate, so a save mid-run strands the effect, and its
+   `DEBUG_MODE = true` prints regardless of the debug setting.

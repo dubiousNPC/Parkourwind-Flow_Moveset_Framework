@@ -3,7 +3,14 @@
 local ROOT = assert(MOD_ROOT, "set MOD_ROOT")
 package.path = ROOT .. "/?.lua;" .. package.path
 
-local M = { log = {}, events = {}, rays = 0, navQueries = 0 }
+local M = { log = {}, events = {}, rays = 0, navQueries = 0,
+            -- engine behaviour on real collision (see rayBox); on by default
+            surfaceStartHits = true,
+            -- SharedRay is a RENDERING ray: on a carved or decorated face its
+            -- normal is the visual triangle's, not the collision plane's.
+            -- Measured on ex_dae_wall_512_01 head-on: (0.93, -0.36, 0.08)
+            -- where the physics ray gives (0, -1, 0). nil = no skew.
+            renderNormal = nil }
 
 ---------------------------------------------------------------- util
 local V3 = {}
@@ -76,7 +83,26 @@ local function rayBox(from, to, b)
             if tmin > tmax then return nil end
         end
     end
-    if not nrm then return nil end -- origin inside: Bullet does not hit
+    if not nrm then
+        -- Origin inside or ON the box. Strictly inside: Bullet does not hit.
+        -- On a face, measured in OpenMW 0.52 on real meshes: the face IS hit,
+        -- at distance 0, with the normal facing the ray (a ray cast up from
+        -- the top of a block hits that top, normal (0,0,-1)). The boxes here
+        -- missed it, and with them every probe Flow started on the surface it
+        -- had just found, which on real geometry refused every vault, mantle
+        -- and ledge grab.
+        if M.surfaceStartHits then
+            for _, ax in ipairs({ "x", "y", "z" }) do
+                local onMin = math.abs(from[ax] - b.min[ax]) < 1e-3
+                local onMax = math.abs(from[ax] - b.max[ax]) < 1e-3
+                if (onMin or onMax) and math.abs(d[ax]) > 1e-9 then
+                    local s = d[ax] > 0 and -1 or 1
+                    return 0, v3(ax == "x" and s or 0, ax == "y" and s or 0, ax == "z" and s or 0)
+                end
+            end
+        end
+        return nil
+    end
     return tmin, nrm
 end
 
@@ -253,6 +279,9 @@ local I = {
             local dir = v3(fwd.x * math.cos(M.pitch), fwd.y * math.cos(M.pitch), math.sin(M.pitch))
             local r = castRay(cam, cam + dir * 500)
             M.rays = M.rays - 1   -- shared ray: not FLOW's cost
+            if r.hit and M.renderNormal then
+                r = { hit = true, hitPos = r.hitPos, hitObject = r.hitObject, hitNormal = M.renderNormal }
+            end
             return r
         end,
     },

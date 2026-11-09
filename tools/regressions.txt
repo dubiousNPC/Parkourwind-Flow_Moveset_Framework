@@ -442,3 +442,31 @@ needs: jumpLatched
 file: scripts/Flow/states/airborne.lua
 why: Skydive armed on not-grounded alone, so a Levitate spell or any pinned actor hovering 1.2 s over a drop skydived and then landed as a knockdown. It needs a real descent.
 needs: SKYDIVE_MIN_FALL_SPEED
+
+file: scripts/Flow/core/geom.lua
+why: a ray that starts ON a collision surface hits it (OpenMW 0.52, real meshes). Every headroom/clearance probe started on the surface it had found, so on real geometry every vault, mantle and ledge grab was refused. The sim's boxes hid it; mock.lua surfaceStartHits now models it.
+needs: Geom.SURFACE_LIFT = 2.0
+needs: pos + util.vector3(0, 0, Geom.SURFACE_LIFT)
+
+file: scripts/Flow/core/sensor.lua
+why: the ceiling probe started on the obstacle top ("Ceiling Blocked" on a 50-unit block in open air); and SharedRay's render normal made a head-on wall "Bad Angle". Lifted probe; physics confirmation of the SharedRay hit.
+needs: topHit.hitPos + util.vector3(0, 0, Geom.SURFACE_LIFT)
+needs: confirmWall(pos, ray.hitPos)
+
+file: scripts/Flow/core/optional/sensor_ext.lua
+why: the lip clearance rays started on the lip, so no real ledge was ever clear and LedgeHang never triggered on real geometry.
+needs: lipRes.hitPos + util.vector3(0, 0, Geom.SURFACE_LIFT)
+
+file: scripts/Flow/states/ledge_hang.lua
+why: a hang never let go after a teleport or with its lip gone (floating, Levitating, controls overridden); and a climb press right after a Shimmy step was dropped by a restarted cooldown.
+needs: stillHanging()
+needs: (prevName == "Shimmy") and CLIMB_COOLDOWN or 0
+
+file: scripts/Flow/playerAnim.lua
+why: without 'use additional anim sources' every move runs with no clip and nothing said why; one hint names the setting.
+needs: use additional anim sources = true
+
+file: scripts/Flow/states/optional/wall_run.lua
+why: teleport is global-only in OpenMW (lua_api: "Can be called only from a global script"); WallRun called mwSelf:teleport from the player and would have raised every frame of a run. It snaps through FLOW_SnapTo like the other states. Found by api_sweep against Cod3x 0.4.
+needs: not-present mwSelf:teleport
+needs: core.sendGlobalEvent('FLOW_SnapTo'

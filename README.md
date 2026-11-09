@@ -4,6 +4,12 @@ A modular framework to animate and improve Morrowind's traversal gameplay
 ## Changes
 **REQUIRES AnimRefresh_V6**
 
+**REQUIRES "Use additional animation sources"** (OpenMW launcher; in
+`settings.cfg`, `[Game] use additional anim sources = true`). It is off by
+default, and without it OpenMW never loads FLOW's `animations/<skeleton>/`
+folders: every move still runs, with no animation at all. FLOW prints a hint
+naming the setting the first time a clip is missing.
+
 
 ## Layout
 
@@ -375,6 +381,25 @@ holding the player.
 
 Constraints that span two files, where nothing else connects them. Everything
 else lives in `RESEARCH.md`.
+
+- **A probe never starts on the surface it came from** (`Geom.SURFACE_LIFT`,
+  2 units). A ray that starts exactly on a collision surface hits that
+  surface at distance 0: cast up from a block top it reports the block, normal
+  (0,0,-1). The sim's boxes did not, so this passed every test. On real
+  geometry in OpenMW 0.52 every headroom and lip-clearance probe found its own
+  floor, and every vault, mantle and ledge grab was refused. `tools/sim/mock.lua`
+  now hits a surface a ray starts on (`surfaceStartHits`), as the engine does.
+- **SharedRay says where to look; a physics ray says what is there.**
+  SharedRay is a rendering ray, so its normal is a visual triangle's. On a
+  carved face (`ex_dae_wall_512_01`) it read (0.93, -0.36, 0.08) where the
+  collision is (0, -1, 0), and a wall met head-on was refused as "Bad Angle".
+  `core/sensor.lua` re-casts a level physics ray to the hit and uses that. A
+  pixel with no collision behind it is not a wall.
+- **The hang lets go of a ledge it has lost.** LedgeHang snaps once and holds
+  the player with Levitate. After a teleport (a Recall scroll, a script) or
+  with the lip gone, it held a floating player with every control overridden.
+  It now checks every 0.25 s that the player is where the hang put them and
+  that a lip is still under the hands, and falls back to Airborne if not.
 
 - **`global/flow_amf_backend.lua` cannot raycast.** `openmw.nearby` is a
   local-script module and does not exist in the global context; requiring it

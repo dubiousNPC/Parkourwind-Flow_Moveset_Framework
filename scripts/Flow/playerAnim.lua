@@ -283,6 +283,8 @@ local function stopCurrent()
     currentGroup = nil
 end
 
+local hintGiven = false
+
 local function playGroup(stateName, looping)
     local entry = GROUPS[stateName]
     local group, variant = resolveGroup(entry)
@@ -295,6 +297,16 @@ local function playGroup(stateName, looping)
             absentWarned[group] = true
             print(string.format("[FLOW][anim] '%s' is not defined on this skeleton "
                 .. "- %s will play nothing", group, stateName))
+            -- The usual cause, by far: OpenMW loads FLOW's animations/<skeleton>/
+            -- folders only with this setting on, and it is off by default.
+            -- Found in a clean OpenMW 0.52 install: every FLOW move ran with
+            -- no clip at all and nothing said why.
+            if not hintGiven then
+                hintGiven = true
+                print("[FLOW][anim] If FLOW's moves play no animation at all, turn on "
+                    .. "'Use additional animation sources' in the OpenMW launcher "
+                    .. "(settings.cfg: [Game] use additional anim sources = true).")
+            end
         end
         return
     end

@@ -149,10 +149,17 @@ python3 tools/sim/run_lua.py tools/sim/test_interop.lua .
 
 Loads the real `main.lua` and `global/flow_amf_backend.lua` against mock
 `openmw.*` modules: a box world with a ray caster, simple gravity, a clock, and
-the backend's events delivered in-process. 45 scenarios cover sensor cost,
+the backend's events delivered in-process. 54 checks cover sensor cost,
 Vault/Mantle and their refusals, the hang/shimmy/boost chain, WallBoost under
-an overhang, the Acrobatics roll, the botched fall, fatigue, the ladder, and
-standing down. Needs the system `liblua5.4` (driven through ctypes), not an
+an overhang, the Acrobatics roll, the botched fall, fatigue, the ladder,
+standing down, real-collision behaviour, a lost hang, and a climb press right
+after a Shimmy step.
+
+The ray caster behaves like the engine on real meshes: **a ray that starts on
+a surface hits it** (`M.surfaceStartHits`), and SharedRay's normal can be
+skewed the way a rendering ray's is on a carved face (`M.renderNormal`). The
+boxes used to be friendlier than real collision, and every vault, mantle and
+ledge grab passed here while all of them were refused in the game. Needs the system `liblua5.4` (driven through ctypes), not an
 interpreter. The mock is deliberately crude - it proves the state machine and
 the holds, not how a move feels.
 

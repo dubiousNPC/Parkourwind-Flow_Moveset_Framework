@@ -6,6 +6,15 @@ local util = require('openmw.util')
 
 local Geom = {}
 
+-- How far a probe starts OFF a surface it was derived from. A ray that starts
+-- exactly on a collision surface hits that surface, at distance 0 - measured
+-- in OpenMW 0.52 on real meshes: up from the top of ex_dwrv_block00 it hit
+-- the block itself, normal (0,0,-1); started 0.5 higher it was clear. Every
+-- headroom and clearance probe FLOW cast from a hit point therefore found its
+-- own floor, and on real geometry every vault, mantle and ledge grab was
+-- refused ("Ceiling Blocked", "no headroom", lip not clear).
+Geom.SURFACE_LIFT = 2.0
+
 local Y = util.vector3(0, 1, 0)
 local X = util.vector3(1, 0, 0)
 local UP = util.vector3(0, 0, 1)
@@ -34,7 +43,9 @@ function Geom.standable(pos, head, floor, tolerance, opts)
     local floorRes = nearby.castRay(top, pos - util.vector3(0, 0, floor), opts)
     if not floorRes.hit then return false, "no floor" end
     if (pos.z - floorRes.hitPos.z) > tolerance then return false, "floor too low" end
-    if nearby.castRay(pos, top, opts).hit then return false, "no headroom" end
+    if nearby.castRay(pos + util.vector3(0, 0, Geom.SURFACE_LIFT), top, opts).hit then
+        return false, "no headroom"
+    end
     return true
 end
 

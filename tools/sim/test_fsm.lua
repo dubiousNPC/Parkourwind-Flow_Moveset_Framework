@@ -253,5 +253,76 @@ M.setSetting('modEnabled', nil)
 M.pressed = {}
 settle()
 
+-------------------------------------------------------------------------------
+print("[12] real collision: what the boxes used to hide")
+-- Measured in OpenMW 0.52 on real meshes (see mock.lua surfaceStartHits and
+-- renderNormal); these refused every move on real geometry before v0.86.
+check("the mock hits a surface a ray starts on (engine behaviour)", M.surfaceStartHits == true)
+M.reset(v3(0, 0, 0), 0)
+-- 115: inside the Mantle band and tall enough that the level camera ray
+-- hits it, so the normal really comes from SharedRay.
+M.box("wall", -100, 60, 0, 100, 200, 115)
+M.renderNormal = v3(0.93, -0.36, 0.08)       -- a carved face, seen by SharedRay
+M.run(0.2)
+M.pressed.Jump = true
+M.step()
+check("a skewed SharedRay normal on a square wall still mantles", M.state() == "Mantle", M.state())
+M.pressed = {}
+M.run(1.2)
+settle()
+M.renderNormal = nil
+-- Something SharedRay sees with no collision behind it (grass, a banner):
+-- the physics confirmation finds nothing, so it is not a wall.
+M.reset(v3(0, 0, 0), 0)
+local realGet = M.I.SharedRay.getUnclipped
+M.I.SharedRay.getUnclipped = function()
+    return { hit = true, hitPos = M.player.position + v3(0, 50, 60), hitNormal = v3(0, -1, 0),
+             hitObject = { recordId = "flora_banner" } }
+end
+M.pressed.Jump = true
+M.step()
+check("a render-only hit with no collision is not a wall", M.state() ~= "Mantle" and M.state() ~= "Vault", M.state())
+M.I.SharedRay.getUnclipped = realGet
+M.pressed = {}
+settle()
+
+-------------------------------------------------------------------------------
+print("[13] the hang knows when it has lost its ledge")
+grab()
+check("hanging", M.state() == "LedgeHang", M.state())
+M.pressed = {}
+M.run(0.5)
+-- A Recall scroll, a scripted move: the player is somewhere else entirely.
+M.player.position = v3(2000, 2000, 500)
+M.run(0.4)
+check("teleported away mid-hang -> lets go (Airborne)", M.state() ~= "LedgeHang", M.state())
+check("and the hang's Levitate is released", M.effects.Levitate == nil, M.effects.Levitate)
+settle()
+grab()
+M.pressed = {}
+M.run(0.5)
+-- The ledge's object disabled under the player.
+M.resetWorld()
+M.run(0.4)
+check("ledge removed under the hands -> lets go", M.state() ~= "LedgeHang", M.state())
+settle()
+
+print("[14] a climb press right after a shimmy step is not dropped")
+grab()
+M.pressed = {}
+M.run(0.4)
+M.pressed.MoveRight = true
+for _ = 1, 120 do M.step(); if M.state() == "Shimmy" then break end end
+M.pressed = {}
+for _ = 1, 180 do M.step(); if M.state() == "LedgeHang" then break end end
+check("step finished back on the hang", M.state() == "LedgeHang", M.state())
+M.step()
+M.pressed.Jump = true          -- within the old 0.3 s cooldown
+M.step()
+M.pressed = {}
+check("jump pressed 2 frames after the step -> Mantle", M.state() == "Mantle", M.state())
+M.run(1.5)
+settle()
+
 print(string.format("\n%d passed, %d failed", pass, fail))
 if fail > 0 then os.exit(1) end

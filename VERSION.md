@@ -25,7 +25,46 @@ Tested against WhyWalk (Core, Boats, Caravans) and Hookshot on the same player.
   skydived, and the knockdown followed on landing. This is FLOW's own bug,
   separate from interop. `EngineSync` now publishes `verticalVelocity`.
 
+### Fixes found on real Morrowind data (OpenMW 0.52, real keys)
+None of these showed in the sim, whose boxes behaved better than real collision.
+- **Vault, Mantle and LedgeHang were refused on real geometry**
+  (`Geom.SURFACE_LIFT`). Every headroom and clearance probe started on the
+  surface it had just found, and a real ray hits that surface, so each move
+  read as blocked ("Ceiling Blocked", "no headroom", lip not clear).
+- **A wall met head-on read as "Bad Angle"** when SharedRay saw it. SharedRay's
+  normal is the render mesh's; a physics ray now confirms the hit and supplies
+  the collision normal (`confirmWall`).
+- **The hang never let go of a ledge it had lost.** After a teleport, or with
+  the lip gone, the player floated in the hang pose, Levitating, controls
+  overridden. Now the hang re-checks its spot and lip every 0.25 s.
+- **A climb press within 0.3 s of a Shimmy step was dropped**, because
+  re-entering LedgeHang restarted the grab cooldown. A step along the ledge no
+  longer restarts it.
+- **The missing-animation case now names its cause.** "Use additional
+  animation sources" is required and off by default; README and a one-time
+  in-game hint say so.
+
+### Checked against Cod3x 0.4
+- `tools/check_context.py`: 34 files, 0 context violations.
+- An API sweep found that the optional WallRun state called `mwSelf:teleport`,
+  which is global-only. It would have raised on every frame of a wall run.
+  WallRun now snaps through `FLOW_SnapTo`, like every other state. It is
+  latent while WallRun stays unregistered, and a marker now guards it.
+
 ### Tests
+- `mock.lua` now behaves like the engine: a ray that starts on a surface hits
+  it (`surfaceStartHits`), and the SharedRay normal can be skewed
+  (`renderNormal`).
+- `test_fsm` has 54 checks: [12] covers real-collision behaviour, [13] the lost
+  hang, [14] the climb press after a step. With the v0.85 files the new
+  checks fail: 20 with the lift removed, and 4 with the old `ledge_hang.lua`.
+- **In engine** on Morrowind + Tribunal + Bloodmoon, all 34 checks pass.
+  Each state runs on a sky arena of real statics, with real XTest keys
+  (default bindings: Jump is E):
+  - Vault, Mantle, LedgeHang, Shimmy, climbing from the hang, Ladder
+    (`in_nord_ladder_02`), Roll, and the whole Skydive;
+  - beside a real WhyWalk guar ride, a real rowboat, and a real Hookshot pull
+    and hang.
 - **`tools/sim/test_interop.lua`, new, 33 checks.** Each holder is emulated by
   what its source does to the player (override, Levitate, per-frame placement,
   Jump). Against v0.85, 11 of them failed.

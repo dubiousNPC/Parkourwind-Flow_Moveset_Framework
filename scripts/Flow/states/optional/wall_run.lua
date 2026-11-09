@@ -217,9 +217,13 @@ function WallRunState:update(dt, syncData, inputData)
     end
 
     -- 4. Apply Movement
-    mwSelf:teleport(mwSelf.cell, nextPos, {
-        onGround = false,
-        rotation = mwSelf.rotation
+    -- Through the backend, like every other state's snap. GameObject:teleport
+    -- "can be called only from a global script" (OpenMW 0.52 lua_api); the
+    -- direct mwSelf:teleport this used would raise every frame of a wall run.
+    -- Found by api_sweep against Cod3x 0.4; latent while WallRun is not
+    -- registered in main.lua.
+    core.sendGlobalEvent('FLOW_SnapTo', {
+        actor = mwSelf, position = nextPos, rotation = mwSelf.rotation,
     })
 
     -- 5. Camera Tilt

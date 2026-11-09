@@ -24,10 +24,25 @@ local WALL_OFFSET = 35
 local KICK_FORCE_BACK = 350
 local KNEE_CHECK_DIST = 60
 local CLIMB_COOLDOWN = 0.3
+-- The hang holds no ledge of its own: it snaps the player once and then keeps
+-- them there with Levitate. If the player ends up somewhere else - a Recall
+-- or Divine Intervention scroll, a scripted teleport, the ledge's object
+-- disabled under them - nothing ever let go: the player floated in the hang
+-- pose, Levitating, with every control overridden, until they thought to
+-- press Sneak. Found in OpenMW 0.52 by teleporting a hanging player.
+-- So once the snap has landed, a player this far from the hang spot (or with
+-- no lip left under the hands) has left the ledge, and falls.
+local HANG_DRIFT_MAX = 60
+local SNAP_GRACE = 0.25        -- the snap is a global event; it lands a frame or two later
+local LIP_RECHECK = 0.25       -- seconds between lip probes
+local LIP_PROBE_UP = 20
+local LIP_PROBE_DOWN = 30
 
 local wallNormal = nil
 local timeInState = 0
 local lip = nil
+local hangPos = nil
+local nextLipCheck = 0
 local lastDir = 0   -- last shimmy step on this ledge; the kick turns that way
 
 local function snapTo(pos, rot)
@@ -63,23 +78,44 @@ function LedgeHangState:canEnter(payload)
     return { lip = d.targetPos, normal = d.wallNormal, dir = 0 }
 end
 
-function LedgeHangState:enter(plan)
-    timeInState = 0
+function LedgeHangState:enter(plan, prevName)
+    -- A step along the same ledge is not a new grab: the climb press that
+    -- follows it is the player's, not the grab's held jump carried over.
+    -- Restarting the cooldown here dropped a press made within 0.3 s of a
+    -- shimmy step finishing, silently.
+    timeInState = (prevName == "Shimmy") and CLIMB_COOLDOWN or 0
     lip = plan.lip
     lastDir = plan.dir
     wallNormal = plan.normal or -Geom.forward(mwSelf)
+    nextLipCheck = SNAP_GRACE
 
-    local hangPos = lip - util.vector3(0, 0, HANG_OFFSET_Z) + (wallNormal * WALL_OFFSET)
+    hangPos = lip - util.vector3(0, 0, HANG_OFFSET_Z) + (wallNormal * WALL_OFFSET)
     local lookDir = -wallNormal
     snapTo(hangPos, util.transform.rotateZ(math.atan2(lookDir.x, lookDir.y)))
 end
 
 function LedgeHangState:exit()
     lip = nil
+    hangPos = nil
+end
+
+-- Still on the ledge: where the hang put us, with a lip under the hands.
+local LIP_RAY_OPTS = { ignore = mwSelf }
+local function stillHanging()
+    if (mwSelf.position - hangPos):length() > HANG_DRIFT_MAX then return false end
+    local res = nearby.castRay(lip + util.vector3(0, 0, LIP_PROBE_UP),
+                               lip - util.vector3(0, 0, LIP_PROBE_DOWN), LIP_RAY_OPTS)
+    return res.hit
 end
 
 function LedgeHangState:update(dt, syncData, inputData)
     timeInState = timeInState + dt
+
+    nextLipCheck = nextLipCheck - dt
+    if nextLipCheck <= 0 then
+        nextLipCheck = LIP_RECHECK
+        if not stillHanging() then return "Airborne" end
+    end
 
     local lateralInput = inputData.moveVector.x
     local lateral = math.abs(lateralInput) > 0.1

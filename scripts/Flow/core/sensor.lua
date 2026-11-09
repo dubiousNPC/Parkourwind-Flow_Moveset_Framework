@@ -6,6 +6,7 @@ local util = require('openmw.util')
 local I = require('openmw.interfaces')
 local Settings = require('scripts/Flow/settings')
 local Body = require('scripts/Flow/core/body')
+local Geom = require('scripts/Flow/core/geom')
 
 -- Height bands, widened for reach: vault 18-58%, mantle to 95%, hang from
 -- 78% (core/optional/sensor_ext.lua). The bands overlap on purpose - the
@@ -107,6 +108,25 @@ local function tryLowScan(pos, forward, maxReach)
     return nil
 end
 
+-- SharedRay is a RENDERING ray (castRenderingRay), so its hit is a visual
+-- triangle: on a carved or decorated face the normal is that triangle's, not
+-- the collision plane's, and some meshes render where they do not collide.
+-- Measured in OpenMW 0.52 on ex_dae_wall_512_01 head-on: SharedRay normal
+-- (0.93, -0.36, 0.08), physics ray (0, -1, 0) - a straight-on wall read as
+-- "Bad Angle". So SharedRay picks WHERE to look, and a physics ray, level
+-- from the feet column to that spot, says what is there. No collision behind
+-- the pixel: no wall.
+local CONFIRM_OVERSHOOT = 30
+local function confirmWall(pos, hitPos)
+    local flat = util.vector3(hitPos.x - pos.x, hitPos.y - pos.y, 0)
+    local len = flat:length()
+    if len < 1 then return nil end
+    local from = util.vector3(pos.x, pos.y, hitPos.z)
+    local res = nearby.castRay(from, from + flat * ((len + CONFIRM_OVERSHOOT) / len), RAY_OPTS)
+    if res.hit and res.hitNormal.z < Sensor.WALKABLE_SLOPE_Z then return res end
+    return nil
+end
+
 function Sensor.registerSharedRay()
     if not I.SharedRay then
         print("[FLOW:Sensor] I.SharedRay not found - make sure SharedRay is bundled and registered in the omwscripts file.")
@@ -170,8 +190,13 @@ function Sensor.update(dt, inputIntents, syncData)
             local ahead = flat.x * forward.x + flat.y * forward.y > 0
 
             if ahead and dist <= dynamicReach then
-                wallPos, wallNormal, wallDist = ray.hitPos, ray.hitNormal, dist
-                source = getObjectName(ray.hitObject)
+                local hard = confirmWall(pos, ray.hitPos)
+                if hard then
+                    local hf = hard.hitPos - pos
+                    wallPos, wallNormal = hard.hitPos, hard.hitNormal
+                    wallDist = util.vector2(hf.x, hf.y):length()
+                    source = getObjectName(hard.hitObject)
+                end
             end
         end
     end
@@ -234,7 +259,9 @@ function Sensor.update(dt, inputIntents, syncData)
         return
     end
 
-    local ceilingHit = nearby.castRay(topHit.hitPos, topHit.hitPos + util.vector3(0, 0, Sensor.HEAD_CLEARANCE), RAY_OPTS)
+    -- Lifted off the top it starts from: see Geom.SURFACE_LIFT.
+    local ceilingFrom = topHit.hitPos + util.vector3(0, 0, Geom.SURFACE_LIFT)
+    local ceilingHit = nearby.castRay(ceilingFrom, ceilingFrom + util.vector3(0, 0, Sensor.HEAD_CLEARANCE), RAY_OPTS)
     if ceilingHit.hit then
         Sensor.data.debugReason = "Ceiling Blocked"
         return

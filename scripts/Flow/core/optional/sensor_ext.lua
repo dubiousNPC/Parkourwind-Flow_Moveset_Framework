@@ -5,6 +5,7 @@ local self = require('openmw.self')
 local util = require('openmw.util')
 local Settings = require('scripts/Flow/settings')
 local Body = require('scripts/Flow/core/body')
+local Geom = require('scripts/Flow/core/geom')
 
 -- Overhead ledges. HANDS_FRAC is where the hands reach, 110% of actor height.
 -- The probe spans well above and below it: this runs ONLY while airborne, from
@@ -157,7 +158,8 @@ function SensorExt.updateLedgeHang(dt, inputIntents, syncData)
 
         if slope > 0.7 then
             local isClear = true
-            local lipHit = lipRes.hitPos
+            -- Lifted off the lip: a ray starting on it hits it (Geom.SURFACE_LIFT).
+            local lipHit = lipRes.hitPos + util.vector3(0, 0, Geom.SURFACE_LIFT)
             local up80 = util.vector3(0, 0, 80)
             local sideOff = right * 25
             for i = 1, 3 do
