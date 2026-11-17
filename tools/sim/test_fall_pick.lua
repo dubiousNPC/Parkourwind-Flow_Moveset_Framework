@@ -1,4 +1,5 @@
--- Unit tests: fall clip selection against the generated manifest. No OpenMW.
+-- Unit tests: the measured manifest and FallPick (bearing maths, durations).
+-- Selection by the authored layout is tested in test_fall_plan.lua. No OpenMW.
 --   python3 tools/sim/run_lua.py tools/sim/test_fall_pick.lua .
 MOD_ROOT = arg[1] or "."
 package.path = MOD_ROOT .. "/?.lua;" .. package.path
@@ -34,8 +35,8 @@ check("no horizontal travel = nil", Pick.bearing(0, 0, 0, 1) == nil)
 print("[2] the manifest")
 local roles = {}
 for _, c in ipairs(clips) do roles[c.role] = (roles[c.role] or 0) + 1 end
-check("15 measured clips (pwfall1up has no start key, left out)", #clips == 15, #clips)
-check("8 air, 4 land, 1 landHard, 2 recover", roles.air == 8 and roles.land == 4 and roles.landHard == 1 and roles.recover == 2)
+check("16 measured clips (pwfall1up keyed since 2026-11-17)", #clips == 16, #clips)
+check("8 air, 4 land, 1 landHard, 3 recover", roles.air == 8 and roles.land == 4 and roles.landHard == 1 and roles.recover == 3)
 
 print("[3] direction is honoured, the clip is not fixed")
 local seen, l = draws({ role = "air", bearing = 90 }, 40)

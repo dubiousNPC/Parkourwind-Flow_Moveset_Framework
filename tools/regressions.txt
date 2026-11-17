@@ -321,7 +321,7 @@ needs: not-present startDive
 file: scripts/Flow/states/stumble.lua
 why: two presentations, one state. "knockdown" is the skydive landing and plays at Scripted priority over whatever the engine is doing; "stumble" is the botched manoeuvre. There is NO Lua setter for an engine knockdown - canMove() only reads one - so the controls are held for the clip instead.
 needs: DURATION = { stumble = 1.00, knockdown = 1.50, fallen = 1.50 }
-needs: Anim.planLanding(kind)
+needs: Anim.planLanding(kind, payload and payload.landing)
 needs: types.Actor.canMove
 
 file: scripts/Flow/playerAnim.lua
@@ -488,7 +488,7 @@ needs: vz < fallVz
 file: scripts/Flow/states/stumble.lua
 why: a skydive lands with an engine knockdown on the same frame. Leaving Stumble on canMove() == false showed the vanilla knockdown instead of the planned landing; the landing plays at Scripted, above Knockdown, and is held. Death still ends it.
 needs: types.Actor.isDead
-needs: kind == "stumble"
+needs: not types.Actor.canMove(mwSelf) and not planned
 
 file: scripts/Flow/core/air_pose.lua
 why: Airborne reads how long the Falling pose showed AFTER AirPose.update has cleared it on the touchdown frame; without the latch every botched fall landed as a plain stumble.
@@ -531,3 +531,27 @@ needs: feetWet
 file: scripts/Flow/playerAnim.lua
 why: Vault and Mantle clips (0.4 s at .8/.7) ended before the backend move did, and the last 8-12 frames of every one showed the engine's jump pose. The clip is stretched to the move.
 needs: Anim.fitNext
+
+file: scripts/Flow/core/fall_plan.lua
+why: fall clips follow the AUTHORED .kf layout (1a fwd right, 1b left, 1c straight, 1ds severe; 2x the same backward; 3a-c tumbles on a close check at high skill, 3df the clean display, 3es the high-skill failure). The measured roll direction disagrees with the author on several clips; selecting by it played left rolls for right falls.
+needs: fwd  = { right = "pwfall1a", left = "pwfall1b", straight = "pwfall1c", severe = "pwfall1ds" }
+needs: back = { right = "pwfall2a", left = "pwfall2b", straight = "pwfall2c", severe = "pwfall2ds" }
+needs: display = "pwfall3df", failed = "pwfall3es"
+
+file: scripts/Flow/core/fall_plan.lua
+why: pwfall1up is the baseline recovery after every failed landing. pwfall3up is reserved for a future high-skill variance pass and pwfall2up is unused; chaining 3es into 3up (the manifest's frame match) is not the design.
+needs: Plan.RECOVER = "pwfall1up"
+needs: Plan.RESERVED = { pwfall3up = true, pwfall2up = true }
+needs: not-present chainTo
+
+file: scripts/Flow/core/skill_check.lua
+why: the landing check uses Luck and the remaining fatigue percentage, as asked (2026-11-17). Fatigue scales the whole chance; Luck adds like Agility does.
+needs: local luck = types.Actor.stats.attributes.luck(mwSelf).modified or 50
+needs: LUCK_WEIGHT * (luck - 50)
+needs: local term = FATIGUE_TERM_BASE - FATIGUE_TERM_SPAN * (1.0 - fatigueRatio())
+
+file: scripts/Flow/states/airborne.lua
+why: a skydive landing is decided by the landing check, not forced into a knockdown: an ordinary-skill player who passes simply lands (or rolls, if armed). A botch is a failure whatever the check says; the check only grades it.
+needs: SkillCheck.fallCheck(impact, FallPlan.roll())
+needs: FallPlan.outcome(math.min(margin, -1))
+needs: #Anim.landingGroups("knockdown", landing) == 0

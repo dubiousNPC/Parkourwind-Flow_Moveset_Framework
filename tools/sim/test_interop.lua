@@ -239,7 +239,7 @@ M.anim.played = {}
 M.player.position = v3(0, 160, 9000); M.player.vz = 0
 local armedAt, releasedAt, buffed
 local states = {}
-for i = 1, 600 do
+for i = 1, 900 do
     M.step()
     if not armedAt and has(M.anim.played, "skydive1") then armedAt = i / 60 end
     if not releasedAt and has(M.anim.played, "skydive") then
@@ -252,13 +252,23 @@ end
 check("off a tower: Skydive arms near 1.2 s", armedAt and armedAt >= 1.2 and armedAt < 1.5, armedAt)
 check("released after the windup", releasedAt and armedAt and releasedAt - armedAt >= 2.9, releasedAt)
 check("released: Acrobatics +250 and Jump +150", buffed)
--- Knockdown plays a planned landing from the measured manifest: a dive-roll
--- (one land clip, 1.67 s) or a hard landing plus its getting-up (3.33 s). The
--- controls are held for exactly that, never the botch stumble's 1.0 s.
+-- The skydive landing is decided by the landing check (core/fall_plan.lua):
+-- this character (Acrobatics 30) is not high-skill, so it is either an
+-- ordinary landing (no Stumble) or a fall clip then pwfall1up. The controls are
+-- held for exactly the planned clips' length.
 local held = 0
 for _, st in ipairs(states) do if st == "Stumble" then held = held + 1 end end
-local okHold = (held >= 98 and held <= 103) or (held >= 198 and held <= 203)
-check("lands as the knockdown Stumble (held for the planned landing)", okHold, held / 60)
+local clipsByGroup = {}
+for _, c in ipairs(require("scripts/Flow/core/fall_clips")) do clipsByGroup[c.group] = c end
+local planned, want = {}, 0
+for _, g in ipairs(M.anim.played) do
+    if g:find("^pwfall") and clipsByGroup[g] then planned[#planned + 1] = g; want = want + clipsByGroup[g].dur end
+end
+local okHold = (held == 0 and #planned == 0)
+    or (#planned == 2 and planned[2] == "pwfall1up" and math.abs(held / 60 - want) <= 0.1)
+check("lands by the check: a fall clip then pwfall1up, held for their length", okHold,
+    string.format("%.2f s for %s (%.2f)", held / 60, table.concat(planned, ","), want))
+check("never pwfall3up (reserved)", not has(M.anim.played, "pwfall3up"))
 check("buffs gone after the landing", M.stats.acrobatics.modifier == 0 and M.effects.Jump == nil,
     M.stats.acrobatics.modifier)
 settle()

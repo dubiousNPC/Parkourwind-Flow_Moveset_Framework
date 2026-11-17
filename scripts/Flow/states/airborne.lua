@@ -17,13 +17,11 @@ local SkillCheck = require('scripts/Flow/core/skill_check')
 local StateManager = require('scripts/Flow/core/state_manager')
 local Anim = require('scripts/Flow/playerAnim')
 local FallPick = require('scripts/Flow/core/fall_pick')
+local FallPlan = require('scripts/Flow/core/fall_plan')
 local Surface = require('scripts/Flow/core/surface')
 
 local AirborneState = BaseState.new("Airborne", { sensors = { forward = true, ledge = true } })
 
--- PRIORITY LADDER. Lowest available action wins; each target's canEnter is
--- the gate. Nothing may go above LedgeHang without re-reading README's
--- Action priority.
 local RUNGS = { "Vault", "Mantle", "LedgeHang" }
 
 local FORWARD_DEADZONE = 0.1
@@ -33,16 +31,8 @@ local ROLL_MIN_AIR_TIME = 0.75
 -- Skydive arms on its own after a sustained fall, with real air below.
 local SKYDIVE_ARM_TIME = 1.2
 local SKYDIVE_CLEARANCE = 1200.0
--- And only while actually FALLING. Not grounded is not falling: a Levitate
--- spell, a hookshot hang, a rider or passenger placed every frame are all
--- not grounded and still, and each skydived 1.2 s in, then landed as a
--- knockdown. A real fall is past 400 u/s down by the time it arms (750
--- from a standing drop, ~450 after a jump's rise), so 300 costs it nothing.
--- Until the fall starts the arm stays open rather than being spent: a
--- levitation that ends over a drop still gets its skydive.
 local SKYDIVE_MIN_FALL_SPEED = 300.0
 
--- The fall's own numbers, for choosing its clips: no damage event needed.
 local HEAVY_FALL_SPEED = 900.0   -- u/s down: the air pool narrows to the big tumbles
 local FALLEN_POSE_TIME = 0.6     -- a botch that showed the Falling pose this long lands as "fallen"
 local fallVz = 0                 -- peak downward speed while off the ground
@@ -122,6 +112,7 @@ function AirborneState:enter()
     skydiveTried = false
     rollHandoff = false
     fallVz = 0
+    fallVx, fallVy = 0, 0
 end
 
 function AirborneState:exit()
@@ -140,25 +131,18 @@ function AirborneState:update(dt, syncData, inputData)
         RollState.setBuff(false)
     end
 
-    -- No ledge grab with the feet still in the water: 0.86 hung a swimmer
-    -- from a lip with the body submerged. Climbing out is Underwater's job.
     local wl = Surface.waterLevel()
     local feetWet = wl and mwSelf.position.z < wl - 10
     if inputData.jump and not feetWet and StateManager.tryAny(RUNGS) then return end
 
-    -- The fall's numbers for choosing its clips. Plain numbers per frame; the
-    -- bearing (a rotation and a vector) is worked out only when a clip is
-    -- actually being picked, by fallContext below.
-    fallVx, fallVy = syncData.velocityX or 0, syncData.velocityY or 0
-    -- PEAK downward speed, not the last reading: EngineSync reports 0 for
-    -- anything over its teleport threshold (3000 u/s, about a 7000-unit drop),
-    -- and on the touchdown frame itself.
+    -- travel while AIRBORNE only: on the touchdown frame the engine reports no
+    -- horizontal speed, and reading it then landed a backward fall forward
+    if not syncData.isGrounded then
+        fallVx, fallVy = syncData.velocityX or 0, syncData.velocityY or 0
+    end
     local vz = syncData.verticalVelocity
     if not syncData.isGrounded and vz and vz < fallVz then fallVz = vz end
 
-    -- Water owes nothing: no skydive, and no stumble waiting for the shore.
-    -- The only water test per frame; AirPose.update relies on it. Once the
-    -- engine says swimming, this is no longer a fall at all.
     if AirPose.inWater() then
         SkillCheck.clearBotch()
         skydiveTried = true
@@ -188,25 +172,49 @@ function AirborneState:update(dt, syncData, inputData)
 
     landedSignal = false
 
-    -- A released skydive lands as a knockdown, ahead of everything else: it is
-    -- the end of the fall, not a manoeuvre to recover from.
     local skydiveLanding = AirPose.takeSkydiveLanding()
     local fellFor = AirPose.takeFallingTime()
     AirPose.clear()
 
+    -- The landing check: skill, agility and LUCK, scaled by the remaining
+    -- FATIGUE %, against the impact speed, with a roll. Its band picks the
+    -- clips (core/fall_plan.lua). Taken after AirPose.clear(), so a skydive's
+    -- acrobatics buff is already gone and the player's own skill is tested.
+    local impact = -fallVz
+
     if skydiveLanding then
+        SkillCheck.clearBotch()
+        local margin, high, chance, diff = SkillCheck.fallCheck(impact, FallPlan.roll())
+        local landing = { outcome = FallPlan.outcome(margin), highSkill = high }
+        AirborneState.lastLanding = string.format("skydive %s%s m%+.0f (c%.0f d%.0f) v%.0f",
+            landing.outcome, high and " HIGH" or "", margin, chance or 0, diff or 0, impact)
+        if Settings.debugMode() then print("[FLOW] landing " .. AirborneState.lastLanding) end
+        -- made it, without the skill for a display: an ordinary landing
+        if #Anim.landingGroups("knockdown", landing) == 0 then
+            if armed then
+                armed = false
+                rollHandoff = true
+                return "Roll"
+            end
+            RollState.setBuff(false)
+            return "Idle"
+        end
         armed = false
         RollState.setBuff(false)
-        SkillCheck.clearBotch()
-        return "Stumble", { kind = "knockdown" }
+        return "Stumble", { kind = "knockdown", landing = landing }
     end
 
-    -- A botched manoeuvre is paid for here, ahead of the roll it would have
-    -- earned: the stumble IS the failure, so it cannot be rolled out of.
     if SkillCheck.botched() then
         armed = false
         RollState.setBuff(false)
-        return "Stumble", { kind = fellFor >= FALLEN_POSE_TIME and "fallen" or "stumble" }
+        -- a botch IS the failure; the check only says how bad it is
+        local margin, high, chance, diff = SkillCheck.fallCheck(impact, FallPlan.roll())
+        local landing = { outcome = FallPlan.outcome(math.min(margin, -1)), highSkill = high }
+        local kind = fellFor >= FALLEN_POSE_TIME and "fallen" or "stumble"
+        AirborneState.lastLanding = string.format("botch/%s %s%s m%+.0f (c%.0f d%.0f) v%.0f", kind,
+            landing.outcome, high and " HIGH" or "", margin, chance or 0, diff or 0, impact)
+        if Settings.debugMode() then print("[FLOW] landing " .. AirborneState.lastLanding) end
+        return "Stumble", { kind = kind, landing = landing }
     end
 
     if armed then

@@ -12,8 +12,13 @@ local PRIORITY_FLOW       = AnimPriority.FLOW
 local PRIORITY_FLOW_MAJOR = AnimPriority.FLOW_MAJOR
 local PRIORITY_SCRIPTED   = AnimPriority.FLOW_SCRIPTED
 
+-- Fall clips: chosen by the authored layout (core/fall_plan.lua); the
+-- measured manifest (core/fall_clips.lua) supplies their lengths.
 local FallClips = require('scripts/Flow/core/fall_clips')
-local FallPick = require('scripts/Flow/core/fall_pick')
+local FallPlan = require('scripts/Flow/core/fall_plan')
+local clipLength = {}
+for _, c in ipairs(FallClips) do clipLength[c.group] = c.dur end
+local DEFAULT_CLIP_LENGTH = 1.667
 
 local GROUPS = {
     Vault     = { group = { "pwvault1", "pwvault2", "pwvault3" }, speed = .8,
@@ -98,9 +103,10 @@ local GROUPS = {
     -- "stumble" after a botched manoeuvre; "knockdown" after a skydive and
     -- "fallen" after a botched fall that showed the Falling pose
     Stumble   = {
-        variants = { stumble = "pwfall1c", knockdown = "pwfall1ds", fallen = "pwfall1up" },
-        seqVariants = { knockdown = true, fallen = true },
-        variantPriority = { knockdown = PRIORITY_SCRIPTED, fallen = PRIORITY_SCRIPTED },
+        -- the variants are only the fallback when no sequence could be planned
+        variants = { stumble = "pwfall1c", knockdown = "pwfall1b", fallen = "pwfall1up" },
+        seqVariants = { stumble = true, knockdown = true, fallen = true },
+        variantPriority = { stumble = PRIORITY_SCRIPTED, knockdown = PRIORITY_SCRIPTED, fallen = PRIORITY_SCRIPTED },
         speed = 1,
         priority = PRIORITY_FLOW_MAJOR,
         blendMask = animation.BLEND_MASK.All,
@@ -116,7 +122,6 @@ local fallSeq = nil       -- remaining clips of a planned landing
 local lastPicked = nil    -- the air clip just played: the next draw prefers a change
 local chainFirst = false  -- first clip of a Falling pose: desync with startPoint
 
-local HARD_IMPACT = 1100  -- u/s down at touchdown: a dive-roll above becomes a hard landing
 
 function Anim.setFallContext(bearing, heavy, impact)
     fallCtx.bearing = bearing
@@ -130,20 +135,36 @@ local function refreshFallContext()
     if fallProvider then Anim.setFallContext(fallProvider()) end
 end
 
-function Anim.planLanding(kind)
+-- Plans the clips of a Stumble from the landing check and returns their total
+-- length in seconds, or nil (nothing to play: a plain landing, or none of the
+-- clips on this skeleton). landing = { outcome = "clean"|"close"|"fail"|"severe",
+-- highSkill = bool }; see core/fall_plan.lua for what each plays.
+function Anim.planLanding(kind, landing)
     refreshFallContext()
-    local seq
-    local function has(g) return Anim.groupExists(g) end
-    if kind == "knockdown" then
-        seq = FallPick.landing(FallClips, fallCtx.impact or 0, HARD_IMPACT,
-            { bearing = fallCtx.bearing, hasGroup = has })
-    elseif kind == "fallen" then
-        local c = FallPick.choose(FallClips, { role = "recover", bearing = fallCtx.bearing, hasGroup = has })
-        seq = c and { c } or {}
+    landing = landing or { outcome = "fail" }
+    local airDir = (kind ~= "knockdown") and FallPlan.dirOf(lastPicked) or nil
+    lastPicked = nil
+    local groups = FallPlan.landing(landing.outcome, {
+        bearing = fallCtx.bearing,
+        highSkill = landing.highSkill,
+        fallen = (kind == "fallen"),
+        dir = airDir,
+    }, Anim.groupExists)
+    if #groups == 0 then fallSeq = nil; return nil end
+    local seq, total = {}, 0
+    for i, g in ipairs(groups) do
+        local dur = clipLength[g] or DEFAULT_CLIP_LENGTH
+        seq[i] = { group = g, dur = dur }
+        total = total + dur
     end
-    if not seq or #seq == 0 then fallSeq = nil; return nil end
     fallSeq = seq
-    return FallPick.duration(seq, GROUPS.Stumble.speed)
+    return total / (GROUPS.Stumble.speed or 1)
+end
+
+function Anim.landingGroups(kind, landing)
+    refreshFallContext()
+    return FallPlan.landing(landing.outcome, { bearing = fallCtx.bearing,
+        highSkill = landing.highSkill, fallen = (kind == "fallen") }, Anim.groupExists)
 end
 
 local pendingVariant = nil
@@ -217,9 +238,8 @@ local function resolveGroup(entry)
     if not entry then return nil end
     if entry.fallPick then
         refreshFallContext()
-        local c = FallPick.choose(FallClips, { role = entry.fallPick, bearing = fallCtx.bearing,
-            heavy = fallCtx.heavy, hasGroup = groupExists, exclude = lastPicked })
-        if c then lastPicked = c.group; return c.group end
+        local g = FallPlan.airClip(fallCtx.bearing, fallCtx.heavy, groupExists, lastPicked)
+        if g then lastPicked = g; return g end
         return entry.group
     end
     if entry.variants then

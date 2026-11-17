@@ -200,16 +200,33 @@ pre['openmw.input'] = function() return {
     isActionPressed = function(a) return M.pressed[a] == true end,
     registerTriggerHandler = function(name, cb) M.triggers[name] = cb end,
 } end
-M.anim = { played = {}, playing = {} }
+M.anim = { played = {}, playing = {}, startedAt = {} }
+-- A one-pass fall clip ends after its measured length, so a planned landing
+-- chains (Anim.tickChain) as it does in the engine. Everything else plays on
+-- until cancelled, as before.
+local fallLength = {}
+do
+    local ok, clips = pcall(require, "scripts/Flow/core/fall_clips")
+    if ok then for _, c in ipairs(clips) do fallLength[c.group] = c.dur end end
+end
 pre['openmw.animation'] = function() return {
     BONE_GROUP = { LowerBody = 0, Torso = 1, LeftArm = 2, RightArm = 3 },
     PRIORITY = setmetatable({}, { __index = function(_, k) return k end }),
     BLEND_MASK = { All = 15 },
     playBlended = function(_, g, o)
         M.anim.played[#M.anim.played + 1] = g; M.anim.playing[g] = true
+        M.anim.startedAt[g] = { t = M.now, speed = (o and o.speed) or 1, loops = o and o.loops }
     end,
     cancel = function(_, g) M.anim.playing[g] = nil end,
-    isPlaying = function(_, g) return M.anim.playing[g] == true end,
+    isPlaying = function(_, g)
+        if M.anim.playing[g] ~= true then return false end
+        local st, len = M.anim.startedAt[g], fallLength[g]
+        if st and len and (st.loops or 0) == 0 and M.now - st.t >= len / st.speed then
+            M.anim.playing[g] = nil
+            return false
+        end
+        return true
+    end,
     hasGroup = function() return true end,
     getTextKeyTime = function() return nil end,
 } end

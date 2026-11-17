@@ -106,6 +106,49 @@ function SkillCheck.attempt(moveName)
     return false
 end
 
+-- ============================================================================
+-- Landing check (falls). Same skill/agility base as the moves, plus LUCK, all
+-- scaled by the remaining FATIGUE percentage, against a difficulty that grows
+-- with the impact speed. The caller adds the landing's roll (FallPlan.roll):
+-- this file stays deterministic, as the move checks require. Returns the
+-- margin (chance - difficulty + roll) and whether the player is in the high
+-- skill tier that owns the acrobatic set. core/fall_plan.lua bands the margin.
+-- ============================================================================
+local LUCK_WEIGHT = 0.25            -- per point of Luck off 50 (Agility is 0.35)
+local FALL_BASE_DIFFICULTY = 20     -- at or below FALL_EASY_SPEED
+local FALL_EASY_SPEED = 600         -- u/s down at touchdown
+local FALL_DIFFICULTY_PER_SPEED = 0.035   -- +35 per 1000 u/s above that
+-- ...up to here. A released skydive always lands at the engine's ~3000 u/s
+-- (measured 2958-2996), so without a cap every skydive landing would be the
+-- hardest check there is; past this, faster is not harder.
+local FALL_MAX_SPEED = 2000
+SkillCheck.HIGH_SKILL = 60          -- Acrobatics (modified) for the acrobatic set
+
+function SkillCheck.fallChance()
+    local acro = types.NPC.stats.skills.acrobatics(mwSelf).modified or 0
+    local agi = types.Actor.stats.attributes.agility(mwSelf).modified or 50
+    local luck = types.Actor.stats.attributes.luck(mwSelf).modified or 50
+    local raw = BASE + SKILL_WEIGHT * acro + AGILITY_WEIGHT * (agi - 50) + LUCK_WEIGHT * (luck - 50)
+    local term = FATIGUE_TERM_BASE - FATIGUE_TERM_SPAN * (1.0 - fatigueRatio())
+    return math.max(0.0, raw * term), acro
+end
+
+function SkillCheck.fallDifficulty(impactSpeed)
+    local v = math.min(impactSpeed or 0, FALL_MAX_SPEED)
+    local extra = math.max(0, v - FALL_EASY_SPEED) * FALL_DIFFICULTY_PER_SPEED
+    return (FALL_BASE_DIFFICULTY + extra) * Settings.skillDifficulty()
+end
+
+-- With skill checks turned off the landing always succeeds by a clean margin.
+function SkillCheck.fallCheck(impactSpeed, roll)
+    local chance, acro = SkillCheck.fallChance()
+    local high = acro >= SkillCheck.HIGH_SKILL
+    if not Settings.skillChecks() then return 100, high, chance, 0 end
+    roll = roll or 0
+    local difficulty = SkillCheck.fallDifficulty(impactSpeed)
+    return chance - difficulty + roll, high, chance, difficulty
+end
+
 function SkillCheck.debugString(moveName)
     return string.format("%s %.0f/%.0f%s", moveName, SkillCheck.chance(),
         SkillCheck.difficulty(moveName), botched and " BOTCH" or "")
