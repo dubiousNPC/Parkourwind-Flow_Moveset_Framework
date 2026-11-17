@@ -27,6 +27,7 @@ local elapsed = 0
 local skydiveBoosted = false
 local skydiveReleased = false
 local landingPending = false
+local fellFor = 0          -- latched at touchdown, like landingPending
 
 local function applySkydiveBoost(enable)
     if enable == skydiveBoosted then return end
@@ -87,6 +88,14 @@ function AirPose.startSkydive()
     pose("Skydive", "entry", false)
 end
 
+-- Seconds the Falling pose showed before this touchdown, latched for the same
+-- reason as the skydive landing: update() clears the pose on that frame.
+function AirPose.takeFallingTime()
+    local t = (mode == "Falling") and elapsed or fellFor
+    fellFor = 0
+    return t
+end
+
 function AirPose.showFalling()
     if mode == "Falling" then return end
     start("Falling")
@@ -128,13 +137,15 @@ function AirPose.update(dt, syncData, inputData)
 
     if syncData.isGrounded then
         if mode == "Skydive" and skydiveReleased then landingPending = true end
+        if mode == "Falling" then fellFor = elapsed end
         AirPose.clear()
         return
     end
 
     elapsed = elapsed + dt
 
-    if mode == "Skydive" then updateSkydive(dt, inputData) end
+    if mode == "Skydive" then updateSkydive(dt, inputData)
+    elseif mode == "Falling" then Anim.tickChain() end
 end
 
 function AirPose.debugString()

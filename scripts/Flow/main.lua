@@ -23,6 +23,8 @@ local LadderState = require('scripts/Flow/states/ladder')
 local ShimmyState = require('scripts/Flow/states/shimmy')
 local WallBoostState = require('scripts/Flow/states/wall_boost')
 local StumbleState = require('scripts/Flow/states/stumble')
+local UnderwaterState = require('scripts/Flow/states/underwater')
+local Surface = require('scripts/Flow/core/surface')
 
 local REGISTERED_STATES = {
     IdleState,
@@ -34,7 +36,8 @@ local REGISTERED_STATES = {
     LadderState,
     ShimmyState,
     WallBoostState,
-    StumbleState
+    StumbleState,
+    UnderwaterState,
 }
 
 local DEBUG_HUD_INTERVAL = 0.1
@@ -46,6 +49,7 @@ local wasActive = true
 -- Leaving the active state releases whatever its traits held (overrides,
 -- Levitate), so switching FLOW off never strands either.
 local function standDown()
+    Surface.close()
     if StateManager.getActiveStateName() ~= "Idle" then
         StateManager.setState("Idle")
     end
@@ -139,7 +143,7 @@ end
 -- the trait.
 local function runSensors(dt, state, intents, debugOn)
     local want = state and state.traits.sensors
-    local asked = want and (intents.jump or debugOn)
+    local asked = want and (intents.jump or debugOn or Surface.climbPending())
     if asked and want.forward then
         Sensor.update(dt, intents, EngineSync.data)
     else
@@ -185,6 +189,7 @@ local function onUpdate(dt)
     InputManager.update()
     runSensors(dt, StateManager.getActiveState(), InputManager.intents, debugOn)
     StateManager.update(dt, EngineSync.data, InputManager.intents)
+    Surface.tick(dt, InputManager.intents)
 
     if debugOn then
         if debugTick() then
@@ -203,11 +208,22 @@ end
 return {
     interfaceName = "Flow",
     interface = {
-        version = 1,
+        version = 2,
         yield = yield,
         resume = resume,
         isYielded = isYielded,
         getState = function() return StateManager.getActiveStateName() end,
+        -- Water, for mods that care where a swimmer is. depth = feet below the
+        -- surface (nil without water); surfacing = the brief WaterWalking
+        -- window FLOW opens to climb out is running.
+        getWater = function()
+            return {
+                swimming = Surface.swimming(),
+                depth = Surface.depth(),
+                atSurface = Surface.atSurface(),
+                surfacing = Surface.isOpen(),
+            }
+        end,
     },
     eventHandlers = {
         Flow_Yield = function(data)

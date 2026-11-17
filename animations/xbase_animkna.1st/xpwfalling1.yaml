@@ -1,0 +1,14 @@
+blending_rules:
+  # Shapes the way INTO these clips only (OpenMW reads the rules of the clip
+  # becoming active). Needs "smooth animation transitions" on.
+  # Air pool, set 1 (lying, rolling to a side): 1.7 s clips whose end and
+  # start poses differ by 75-125 deg of mean bone angle, so FLOW re-draws a
+  # clip at each end and this blend has to carry the seam.
+  - from: "*"
+    to: "pwfall1*"
+    easing: "sineOut"
+    duration: 0.35
+  - from: "pwfall*"
+    to: "pwfall1*"
+    easing: "sineInOut"
+    duration: 0.45

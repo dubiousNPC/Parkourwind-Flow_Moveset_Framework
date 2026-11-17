@@ -1,0 +1,17 @@
+blending_rules:
+  # Shapes the way INTO these clips only. Needs "smooth animation transitions".
+  # Air pool, set 2 (on the back): every clip ends in the same pose and the
+  # starts sit 30-40 deg from it, so the set chains on a short blend.
+  - from: "*"
+    to: "pwfall2*"
+    easing: "sineOut"
+    duration: 0.30
+  - from: "pwfall2*"
+    to: "pwfall2*"
+    easing: "sineInOut"
+    duration: 0.20
+  # Righting yourself in the air starts lying at 80 deg: give it longer.
+  - from: "*"
+    to: "pwfall2up: *"
+    easing: "sineInOut"
+    duration: 0.35

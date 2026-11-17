@@ -2,6 +2,7 @@
 -- Mantle. Climbs onto a waist-to-head surface.
 local BaseState = require('scripts/Flow/states/base_state')
 local SkillCheck = require('scripts/Flow/core/skill_check')
+local Anim = require('scripts/Flow/playerAnim')
 local mwSelf = require('openmw.self')
 local util = require('openmw.util')
 local core = require('openmw.core')
@@ -79,6 +80,7 @@ function MantleState:canEnter(payload)
 end
 
 function MantleState:enter(plan)
+    Anim.fitNext(plan.duration + COMPLETION_GRACE)
     SkillCheck.attempt("Mantle")
     totalDuration = plan.duration
     timeInState = 0

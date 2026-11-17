@@ -6,14 +6,14 @@ local I = require('openmw.interfaces')
 
 local Anim = {}
 
--- Above the engine's Jump (4) and Movement (5). Per-bone-group tables, not bare
--- enums: a uniform priority is DELETED by any engine animation sharing it, not
--- just outranked. See core/anim_priority.lua.
 local AnimPriority = require('scripts/Flow/core/anim_priority')
 local Settings = require('scripts/Flow/settings')
 local PRIORITY_FLOW       = AnimPriority.FLOW
 local PRIORITY_FLOW_MAJOR = AnimPriority.FLOW_MAJOR
 local PRIORITY_SCRIPTED   = AnimPriority.FLOW_SCRIPTED
+
+local FallClips = require('scripts/Flow/core/fall_clips')
+local FallPick = require('scripts/Flow/core/fall_pick')
 
 local GROUPS = {
     Vault     = { group = { "pwvault1", "pwvault2", "pwvault3" }, speed = .8,
@@ -46,7 +46,6 @@ local GROUPS = {
     },
 
     Shimmy = {
-        -- Third-person sets key these pwshimmyl1/r1, the .1st sets pwshimmy1l/1r.
         variants = { left = { "pwshimmyl1", "pwshimmy1l" },
                      right = { "pwshimmyr1", "pwshimmy1r" } },
         speed = 1,
@@ -73,8 +72,6 @@ local GROUPS = {
         stopKey = "stop",
     },
 
-    -- skydive1 is the windup, `skydive` the looping idle: the hand-over is a
-    -- group change, not a key change.
     Skydive   = {
         variants = { entry = "skydive1", loop = "skydive",
                      left = "skydivel", right = "skydiver",
@@ -87,19 +84,23 @@ local GROUPS = {
         stopKey = "stop",
     },
 
+    -- Out-of-control fall: a clip drawn from the manifest's `air` pool by the
+    -- fall's bearing
     Falling   = {
-        group = "pwfalling", speed = 1,
+        fallPick = "air", chain = true,
+        group = "dbsfall", speed = 1,
         priority = PRIORITY_FLOW,
         blendMask = animation.BLEND_MASK.All,
         startKey = "start",
         stopKey = "stop",
     },
 
-    -- "stumble" after a botched manoeuvre; "knockdown" after a skydive, at
-    -- Scripted priority so it plays over whatever the engine is doing.
+    -- "stumble" after a botched manoeuvre; "knockdown" after a skydive and
+    -- "fallen" after a botched fall that showed the Falling pose
     Stumble   = {
-        variants = { stumble = "dbsfall", knockdown = { "pwfalling", "dbsfall" } },
-        variantPriority = { knockdown = PRIORITY_SCRIPTED },
+        variants = { stumble = "pwfall1c", knockdown = "pwfall1ds", fallen = "pwfall1up" },
+        seqVariants = { knockdown = true, fallen = true },
+        variantPriority = { knockdown = PRIORITY_SCRIPTED, fallen = PRIORITY_SCRIPTED },
         speed = 1,
         priority = PRIORITY_FLOW_MAJOR,
         blendMask = animation.BLEND_MASK.All,
@@ -109,6 +110,41 @@ local GROUPS = {
 }
 
 local currentGroup = nil
+
+local fallCtx = { bearing = nil, heavy = false, impact = 0 }
+local fallSeq = nil       -- remaining clips of a planned landing
+local lastPicked = nil    -- the air clip just played: the next draw prefers a change
+local chainFirst = false  -- first clip of a Falling pose: desync with startPoint
+
+local HARD_IMPACT = 1100  -- u/s down at touchdown: a dive-roll above becomes a hard landing
+
+function Anim.setFallContext(bearing, heavy, impact)
+    fallCtx.bearing = bearing
+    fallCtx.heavy = heavy and true or false
+    fallCtx.impact = impact or 0
+end
+
+local fallProvider = nil
+function Anim.setFallContextProvider(fn) fallProvider = fn end
+local function refreshFallContext()
+    if fallProvider then Anim.setFallContext(fallProvider()) end
+end
+
+function Anim.planLanding(kind)
+    refreshFallContext()
+    local seq
+    local function has(g) return Anim.groupExists(g) end
+    if kind == "knockdown" then
+        seq = FallPick.landing(FallClips, fallCtx.impact or 0, HARD_IMPACT,
+            { bearing = fallCtx.bearing, hasGroup = has })
+    elseif kind == "fallen" then
+        local c = FallPick.choose(FallClips, { role = "recover", bearing = fallCtx.bearing, hasGroup = has })
+        seq = c and { c } or {}
+    end
+    if not seq or #seq == 0 then fallSeq = nil; return nil end
+    fallSeq = seq
+    return FallPick.duration(seq, GROUPS.Stumble.speed)
+end
 
 local pendingVariant = nil
 
@@ -128,8 +164,6 @@ function Anim.registerAnimRefresh()
     end, { verify = true })
 end
 
--- Clip time from skydive1's start to the author's `skydive: release` key,
--- divided by how many seconds the player wants that to take.
 local SKYDIVE_RELEASE_SPAN = 5.467   -- fallback if the key is missing
 
 function Anim.skydiveWindupSpeed()
@@ -150,10 +184,6 @@ end
 
 local lastVariant = {}
 
--- Which groups this skeleton actually defines. Cleared on a model rebuild,
--- because first and third person load different animation sources: every .1st
--- set keys shimmy pwshimmy1l/1r and no set but the beast one has pwwalljump2,
--- so an unfiltered random pick is a silent no-op half the time.
 local groupAvailable = {}
 local absentWarned = {}
 
@@ -180,11 +210,24 @@ local function pickAvailable(list)
     return pool[math.random(#pool)]
 end
 
+Anim.groupExists = groupExists
+
 -- Resolves a GROUPS entry to an actual group name, honouring `variants`.
 local function resolveGroup(entry)
     if not entry then return nil end
+    if entry.fallPick then
+        refreshFallContext()
+        local c = FallPick.choose(FallClips, { role = entry.fallPick, bearing = fallCtx.bearing,
+            heavy = fallCtx.heavy, hasGroup = groupExists, exclude = lastPicked })
+        if c then lastPicked = c.group; return c.group end
+        return entry.group
+    end
     if entry.variants then
         local key = pendingVariant or lastVariant[entry]
+        if key and entry.seqVariants and entry.seqVariants[key] and fallSeq and #fallSeq > 0 then
+            lastVariant[entry] = key
+            return table.remove(fallSeq, 1).group, key
+        end
         local group = key and entry.variants[key]
         if not group then
             for k, g in pairs(entry.variants) do key, group = k, g; break end
@@ -234,9 +277,6 @@ function Anim.verifyGroups()
         end
     end
 
-    -- A group whose start key is missing is unplayable and silent. A slot with
-    -- no playable clip at all is the fatal case; absent siblings only cost
-    -- variety, and the two POVs legitimately define different clip names.
     local function keysMissing(group, sk, tk)
         if not animation.getTextKeyTime then return nil end
         local bad = {}
@@ -285,7 +325,13 @@ end
 
 local hintGiven = false
 
+local fitSeconds = nil
+function Anim.fitNext(seconds) fitSeconds = seconds end
+local FIT_MIN_SPEED, FIT_MAX_SPEED = 0.4, 2.5
+
 local function playGroup(stateName, looping)
+    local fit = fitSeconds
+    fitSeconds = nil   -- consumed by this call, played or not
     local entry = GROUPS[stateName]
     local group, variant = resolveGroup(entry)
     pendingVariant = nil   -- consumed; never let a direction leak forward
@@ -297,10 +343,6 @@ local function playGroup(stateName, looping)
             absentWarned[group] = true
             print(string.format("[FLOW][anim] '%s' is not defined on this skeleton "
                 .. "- %s will play nothing", group, stateName))
-            -- The usual cause, by far: OpenMW loads FLOW's animations/<skeleton>/
-            -- folders only with this setting on, and it is off by default.
-            -- Found in a clean OpenMW 0.52 install: every FLOW move ran with
-            -- no clip at all and nothing said why.
             if not hintGiven then
                 hintGiven = true
                 print("[FLOW][anim] If FLOW's moves play no animation at all, turn on "
@@ -331,15 +373,33 @@ local function playGroup(stateName, looping)
         speed = entry.variantSpeed[variant]
     end
     if type(speed) == "function" then speed = speed() end
+    if fit and fit > 0 and animation.getTextKeyTime then
+        local a = animation.getTextKeyTime(self, group .. ": " .. (startKey or "start"))
+        local b = animation.getTextKeyTime(self, group .. ": " .. (stopKey or "stop"))
+        if a and b and b > a then
+            speed = math.max(FIT_MIN_SPEED, math.min(FIT_MAX_SPEED, (b - a) / fit))
+        end
+    end
 
     local priority = entry.priority
     if variant and entry.variantPriority and entry.variantPriority[variant] then
         priority = entry.variantPriority[variant]
     end
 
+    local chained = entry.chain or (entry.seqVariants and variant and entry.seqVariants[variant])
+    local startPoint = nil
+    if entry.chain then
+        looping, autoDisable = false, false
+        if chainFirst then startPoint = math.random() * 0.3 end
+        chainFirst = false
+    elseif chained then
+        autoDisable = false
+    end
+
     animation.playBlended(self, group, {
         startKey = startKey,
         stopKey = stopKey,
+        startPoint = startPoint,
         priority = priority,
         blendMask = entry.blendMask,
         speed = speed,
@@ -361,9 +421,6 @@ reissue = function()
     playGroup(lastRequest.state, lastRequest.looping)
 end
 
--- Re-resolves the current state's group, picking up a new variant. `force` is
--- for a variant that resolves to the group already playing, which playGroup
--- otherwise skips.
 function Anim.replay(force)
     if not lastRequest then return end
     if force then currentGroup = nil end
@@ -374,6 +431,8 @@ end
 -- authority; this only drives the skeleton. AnimRefresh still reissues it.
 function Anim.setPose(name, variant, looping)
     pendingVariant = variant
+    chainFirst = true
+    lastPicked = nil
     lastRequest = { state = name, looping = looping and true or false }
     currentGroup = nil
     playGroup(name, looping and true or false)
@@ -382,6 +441,22 @@ end
 function Anim.clearPose()
     lastRequest = nil
     stopCurrent()
+end
+
+function Anim.tickChain()
+    if not lastRequest or not currentGroup then return end
+    local entry = GROUPS[lastRequest.state]
+    if not entry then return end
+    local seq = entry.seqVariants and fallSeq and #fallSeq > 0
+    if not (entry.chain or seq) then return end
+    local done = not animation.isPlaying(self, currentGroup)
+    if not done and animation.getCompletion then
+        local c = animation.getCompletion(self, currentGroup)
+        done = (c == nil) or c >= 0.999
+    end
+    if not done then return end
+    currentGroup = nil
+    playGroup(lastRequest.state, lastRequest.looping)
 end
 
 -- `mode` is the entering state's traits.anim: "oneshot", "loop" or nil.

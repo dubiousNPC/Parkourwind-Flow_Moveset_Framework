@@ -6,6 +6,7 @@ local I = require('openmw.interfaces')
 local input = require('openmw.input')
 local async = require('openmw.async')
 local mwSelf = require('openmw.self')
+local types = require('openmw.types')
 local nearby = require('openmw.nearby')
 local util = require('openmw.util')
 local RollState = require('scripts/Flow/states/roll')
@@ -14,6 +15,9 @@ local Settings = require('scripts/Flow/settings')
 local AirPose = require('scripts/Flow/core/air_pose')
 local SkillCheck = require('scripts/Flow/core/skill_check')
 local StateManager = require('scripts/Flow/core/state_manager')
+local Anim = require('scripts/Flow/playerAnim')
+local FallPick = require('scripts/Flow/core/fall_pick')
+local Surface = require('scripts/Flow/core/surface')
 
 local AirborneState = BaseState.new("Airborne", { sensors = { forward = true, ledge = true } })
 
@@ -37,6 +41,23 @@ local SKYDIVE_CLEARANCE = 1200.0
 -- Until the fall starts the arm stays open rather than being spent: a
 -- levitation that ends over a drop still gets its skydive.
 local SKYDIVE_MIN_FALL_SPEED = 300.0
+
+-- The fall's own numbers, for choosing its clips: no damage event needed.
+local HEAVY_FALL_SPEED = 900.0   -- u/s down: the air pool narrows to the big tumbles
+local FALLEN_POSE_TIME = 0.6     -- a botch that showed the Falling pose this long lands as "fallen"
+local fallVz = 0                 -- peak downward speed while off the ground
+local fallVx, fallVy = 0, 0      -- horizontal velocity, world axes
+
+-- Asked by playerAnim at pick time only.
+local function fallContext()
+    local bearing = nil
+    if fallVx * fallVx + fallVy * fallVy > 100 * 100 then
+        local f = mwSelf.rotation * util.vector3(0, 1, 0)
+        bearing = FallPick.bearing(fallVx, fallVy, f.x, f.y)
+    end
+    return bearing, fallVz < -HEAVY_FALL_SPEED, -fallVz
+end
+Anim.setFallContextProvider(fallContext)
 
 local armed = false
 local timeAirborne = 0
@@ -100,6 +121,7 @@ function AirborneState:enter()
     landedSignal = false
     skydiveTried = false
     rollHandoff = false
+    fallVz = 0
 end
 
 function AirborneState:exit()
@@ -118,14 +140,30 @@ function AirborneState:update(dt, syncData, inputData)
         RollState.setBuff(false)
     end
 
-    if inputData.jump and StateManager.tryAny(RUNGS) then return end
+    -- No ledge grab with the feet still in the water: 0.86 hung a swimmer
+    -- from a lip with the body submerged. Climbing out is Underwater's job.
+    local wl = Surface.waterLevel()
+    local feetWet = wl and mwSelf.position.z < wl - 10
+    if inputData.jump and not feetWet and StateManager.tryAny(RUNGS) then return end
+
+    -- The fall's numbers for choosing its clips. Plain numbers per frame; the
+    -- bearing (a rotation and a vector) is worked out only when a clip is
+    -- actually being picked, by fallContext below.
+    fallVx, fallVy = syncData.velocityX or 0, syncData.velocityY or 0
+    -- PEAK downward speed, not the last reading: EngineSync reports 0 for
+    -- anything over its teleport threshold (3000 u/s, about a 7000-unit drop),
+    -- and on the touchdown frame itself.
+    local vz = syncData.verticalVelocity
+    if not syncData.isGrounded and vz and vz < fallVz then fallVz = vz end
 
     -- Water owes nothing: no skydive, and no stumble waiting for the shore.
-    -- The only water test per frame; AirPose.update relies on it.
+    -- The only water test per frame; AirPose.update relies on it. Once the
+    -- engine says swimming, this is no longer a fall at all.
     if AirPose.inWater() then
         SkillCheck.clearBotch()
         skydiveTried = true
         AirPose.clear()
+        if Surface.inWater() then return "Underwater" end
     end
 
     -- Below the ladder, and a pose rather than a state, so everything above
@@ -153,6 +191,7 @@ function AirborneState:update(dt, syncData, inputData)
     -- A released skydive lands as a knockdown, ahead of everything else: it is
     -- the end of the fall, not a manoeuvre to recover from.
     local skydiveLanding = AirPose.takeSkydiveLanding()
+    local fellFor = AirPose.takeFallingTime()
     AirPose.clear()
 
     if skydiveLanding then
@@ -167,7 +206,7 @@ function AirborneState:update(dt, syncData, inputData)
     if SkillCheck.botched() then
         armed = false
         RollState.setBuff(false)
-        return "Stumble", { kind = "stumble" }
+        return "Stumble", { kind = fellFor >= FALLEN_POSE_TIME and "fallen" or "stumble" }
     end
 
     if armed then

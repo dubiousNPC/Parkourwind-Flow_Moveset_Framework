@@ -320,7 +320,8 @@ needs: not-present startDive
 
 file: scripts/Flow/states/stumble.lua
 why: two presentations, one state. "knockdown" is the skydive landing and plays at Scripted priority over whatever the engine is doing; "stumble" is the botched manoeuvre. There is NO Lua setter for an engine knockdown - canMove() only reads one - so the controls are held for the clip instead.
-needs: DURATION = { stumble = 1.00, knockdown = 1.50 }
+needs: DURATION = { stumble = 1.00, knockdown = 1.50, fallen = 1.50 }
+needs: Anim.planLanding(kind)
 needs: types.Actor.canMove
 
 file: scripts/Flow/playerAnim.lua
@@ -470,3 +471,63 @@ file: scripts/Flow/states/optional/wall_run.lua
 why: teleport is global-only in OpenMW (lua_api: "Can be called only from a global script"); WallRun called mwSelf:teleport from the player and would have raised every frame of a run. It snaps through FLOW_SnapTo like the other states. Found by api_sweep against Cod3x 0.4.
 needs: not-present mwSelf:teleport
 needs: core.sendGlobalEvent('FLOW_SnapTo'
+
+file: scripts/Flow/states/airborne.lua
+why: a swimmer is not on the ground, so 0.86 ran the swim as Airborne: Roll armed and fired under water, LedgeHang grabbed a lip with the body submerged, and other mods read a swim as a fall. Measured in OpenMW 0.52 (flow_water.lua). Airborne hands a swimmer to Underwater.
+needs: return "Underwater"
+
+file: scripts/Flow/core/surface.lua
+why: isSwimming flickers off for a swimmer bobbing at the surface (measured: not swimming and ON THE GROUND at feet -105), which put the player in Idle under water. Half a body under with nothing beneath the feet counts as in the water.
+needs: Surface.inWater
+needs: Body.height() * 0.5
+
+file: scripts/Flow/states/airborne.lua
+why: EngineSync reports verticalVelocity 0 above 3000 u/s (its teleport threshold) and on the touchdown frame, so the LAST reading made every big fall land as a soft one. The fall's impact is its PEAK downward speed.
+needs: vz < fallVz
+
+file: scripts/Flow/states/stumble.lua
+why: a skydive lands with an engine knockdown on the same frame. Leaving Stumble on canMove() == false showed the vanilla knockdown instead of the planned landing; the landing plays at Scripted, above Knockdown, and is held. Death still ends it.
+needs: types.Actor.isDead
+needs: kind == "stumble"
+
+file: scripts/Flow/core/air_pose.lua
+why: Airborne reads how long the Falling pose showed AFTER AirPose.update has cleared it on the touchdown frame; without the latch every botched fall landed as a plain stumble.
+needs: takeFallingTime
+
+file: scripts/Flow/playerAnim.lua
+why: GROUPS names are animation GROUPS (the text keys inside a .kf), not file names. "pwfalling", "pwfalling1/2/3" are file names: no skeleton defines them, so the botch stumble played nothing at all (engine jump/idle showed through) and check_anims reported 4 unplayable slots.
+needs: not-present "pwfalling1"
+needs: not-present "pwfalling"
+needs: dbsfall
+
+file: scripts/Flow/states/shimmy.lua
+why: engine sideMovement does not move a THIRD-person actor while pwshimmy* holds the legs: the step stood still ~0.7 s, then walkright lurched 47 units in two frames and the snap pulled it back. A backend Glide carries the step in both views.
+needs: FLOW_Glide_Start
+needs: FLOW_Move_Cancel
+
+file: scripts/Flow/states/shimmy.lua
+why: a step lasts STEP_TIME now; Jump pressed during it with no direction held is the hang's climb, not a WallBoost off the wall.
+needs: climbQueued
+
+file: scripts/Flow/core/surface.lua
+why: lifting first and letting the climb refuse stood the swimmer on the water and dropped it back in ("a partial jump"). The lip is checked for headroom over the water, Sensor.HEAD_CLEARANCE over the lip and a place to stand BEFORE the lift.
+needs: ceiling over the lip
+needs: nowhere to stand on top
+needs: no headroom over the water
+
+file: scripts/Flow/core/surface.lua
+why: once lifted, the engine turns the held Jump into a real jump off the water before the ladder's async sensor has its frame; and a window with no climb must shut quickly, counted in frames as well as seconds (10 fps closed it in 2 frames).
+needs: mwSelf.controls.jump = false
+needs: STAND_GRACE_FRAMES
+
+file: scripts/Flow/states/idle.lua
+why: the forward sensor reads a sill against a wall as a wall; the lip Surface already checked is handed to Mantle directly.
+needs: Surface.lipPoint()
+
+file: scripts/Flow/states/airborne.lua
+why: no LedgeHang with the feet under water (0.86 hung swimmers from lips while submerged).
+needs: feetWet
+
+file: scripts/Flow/playerAnim.lua
+why: Vault and Mantle clips (0.4 s at .8/.7) ended before the backend move did, and the last 8-12 frames of every one showed the engine's jump pose. The clip is stretched to the move.
+needs: Anim.fitNext

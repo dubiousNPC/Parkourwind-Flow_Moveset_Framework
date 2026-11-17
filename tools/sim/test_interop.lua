@@ -115,7 +115,9 @@ seen, clips = pinned(2.2, function(t) return v3(0, 400 + 300 * t, 4000 - 0.5 * G
 check("no Skydive on a falling mount", not has(clips, "skydive1"), table.concat(clips, ","))
 check("no Skydive buffs on the rider", M.stats.acrobatics.modifier == 0 and M.effects.Jump == nil)
 seen, clips = pinned(0.3, function() return v3(0, 1060, 120) end)
-check("mount lands: no knockdown Stumble", only(seen, "Idle") and not has(clips, "pwfalling"))
+local landClip = false
+for _, g in ipairs(clips) do if g:find("^pwfall3") then landClip = true end end
+check("mount lands: no knockdown Stumble", only(seen, "Idle") and not landClip)
 release("WhyWalk", 1)
 settle()
 
@@ -250,11 +252,13 @@ end
 check("off a tower: Skydive arms near 1.2 s", armedAt and armedAt >= 1.2 and armedAt < 1.5, armedAt)
 check("released after the windup", releasedAt and armedAt and releasedAt - armedAt >= 2.9, releasedAt)
 check("released: Acrobatics +250 and Jump +150", buffed)
--- Knockdown picks pwfalling or dbsfall at random (playerAnim pickAvailable);
--- what tells it from a botch stumble is the 1.5 s hold against 1.0.
+-- Knockdown plays a planned landing from the measured manifest: a dive-roll
+-- (one land clip, 1.67 s) or a hard landing plus its getting-up (3.33 s). The
+-- controls are held for exactly that, never the botch stumble's 1.0 s.
 local held = 0
 for _, st in ipairs(states) do if st == "Stumble" then held = held + 1 end end
-check("lands as the knockdown Stumble (held 1.5 s)", held >= 88 and held <= 92, held / 60)
+local okHold = (held >= 98 and held <= 103) or (held >= 198 and held <= 203)
+check("lands as the knockdown Stumble (held for the planned landing)", okHold, held / 60)
 check("buffs gone after the landing", M.stats.acrobatics.modifier == 0 and M.effects.Jump == nil,
     M.stats.acrobatics.modifier)
 settle()

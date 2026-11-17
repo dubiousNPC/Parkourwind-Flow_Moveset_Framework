@@ -13,6 +13,8 @@ local EngineSync = {
         -- From position, like forwardVelocity: u/s, negative while descending.
         -- 0 across a teleport, which is a placement, not a speed.
         verticalVelocity = 0,
+        velocityX = 0,
+        velocityY = 0,
         isGrounded = true,
         groundedTime = 0,
         landings = 0,
@@ -70,8 +72,13 @@ function EngineSync.update(dt)
     local speed = math.sqrt(dx * dx + dy * dy) / dt
     if speed > EngineSync.TELEPORT_SPEED and not EngineSync.suspended then
         EngineSync.data.forwardVelocity = 0
+        EngineSync.data.velocityX, EngineSync.data.velocityY = 0, 0
         return
     end
+
+    -- Horizontal velocity, world axes: the fall-clip choice reads its bearing
+    -- off the facing, and needs it on the first airborne frame.
+    EngineSync.data.velocityX, EngineSync.data.velocityY = dx / dt, dy / dt
 
     EngineSync.data.forwardVelocity = speed
 end

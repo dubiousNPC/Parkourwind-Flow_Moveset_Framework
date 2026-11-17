@@ -2,6 +2,7 @@
 -- Vault. Hurdles a knee-to-waist obstacle.
 local BaseState = require('scripts/Flow/states/base_state')
 local SkillCheck = require('scripts/Flow/core/skill_check')
+local Anim = require('scripts/Flow/playerAnim')
 local core = require('openmw.core')
 local mwSelf = require('openmw.self')
 local util = require('openmw.util')
@@ -104,6 +105,7 @@ function VaultState:canEnter()
 end
 
 function VaultState:enter(plan)
+    Anim.fitNext(plan.duration + COMPLETION_GRACE)
     SkillCheck.attempt("Vault")
     estimatedDuration = plan.duration
     timeInState = 0

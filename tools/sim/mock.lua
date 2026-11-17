@@ -214,10 +214,24 @@ pre['openmw.animation'] = function() return {
     getTextKeyTime = function() return nil end,
 } end
 
+-- Water: M.water = level (nil = dry). A swimmer floats with its feet
+-- M.SWIM_DEPTH under the surface (measured 120-133 in OpenMW 0.52); with
+-- WaterWalking the engine lifts it onto the water, where it stands.
+M.water = nil
+M.SWIM_DEPTH = 125
+local function walkingOnWater()
+    return M.water and (M.effects.WaterWalking or 0) > 0 and math.abs(player.position.z - M.water) < 2
+end
+local function swimming()
+    return M.water ~= nil and player.position.z < M.water - 20 and not walkingOnWater()
+end
+M.swimming = swimming
 local function grounded()
     -- A teleported actor skips its physics step, so the engine never reports
     -- one pinned every frame as on the ground (WhyWalk caravans_player notes).
     if M.notGrounded then return false end
+    if walkingOnWater() then return true end
+    if swimming() then return false end
     local below = castRay(player.position + v3(0, 0, 2), player.position - v3(0, 0, 2))
     M.rays = M.rays - 1
     return below.hit and player.vz <= 0
@@ -228,13 +242,15 @@ local function activeEffects()
         local k = arg and (id .. "|" .. arg) or id
         M.effects[k] = (M.effects[k] or 0) + amount
         if M.effects[k] == 0 then M.effects[k] = nil end
-    end }
+    end,
+    getEffect = function(_, id) return { magnitude = M.effects[id] or 0 } end }
 end
 pre['openmw.types'] = function() return {
     Actor = {
         isOnGround = function() return grounded() end,
         canMove = function() return true end,
-        isSwimming = function() return false end,
+        isDead = function() return false end,
+        isSwimming = function() return swimming() end,
         getEncumbrance = function() return 0 end,
         getCapacity = function() return 100 end,
         activeEffects = activeEffects,
@@ -323,7 +339,23 @@ function M.step(dt)
     M.backend.engineHandlers.onUpdate(dt)
     M.movedThisFrame = (M.teleports or 0) > before
     -- physics: gravity unless levitating or the backend drove the actor
-    if not M.movedThisFrame and not (M.effects.Levitate and M.effects.Levitate > 0) then
+    player.cell.hasWater = M.water ~= nil
+    player.cell.waterLevel = M.water or false
+    if not M.movedThisFrame and M.water and (M.effects.WaterWalking or 0) > 0
+       and player.position.z < M.water and player.vz <= 0 then
+        -- the engine lifts a water walker to the surface
+        player.position = v3(player.position.x, player.position.y, M.water); player.vz = 0
+    elseif not M.movedThisFrame and swimming() then
+        -- float at swim depth; forward stroke while the move key is held
+        player.vz = 0
+        local target = M.water - M.SWIM_DEPTH
+        local z = player.position.z + math.max(-200 * dt, math.min(200 * dt, target - player.position.z))
+        local fwd = rotZ(player.rotation:getYaw()):apply(v3(0, 1, 0))
+        local stroke = (M.pressed and M.pressed.MoveForward) and fwd * (120 * dt) or v3(0, 0, 0)
+        local nxt = v3(player.position.x, player.position.y, z) + stroke
+        if castRay(player.position + v3(0, 0, 60), nxt + v3(0, 0, 60)).hit then nxt = v3(player.position.x, player.position.y, z) end
+        player.position = nxt
+    elseif not M.movedThisFrame and not (M.effects.Levitate and M.effects.Levitate > 0) then
         player.vz = player.vz - GRAVITY * dt
         local nz = player.position.z + player.vz * dt
         local floor = castRay(player.position + v3(0, 0, 1), v3(player.position.x, player.position.y, nz - 1))
@@ -354,6 +386,7 @@ end
 
 function M.reset(pos, yaw)
     M.resetWorld()
+    M.water = nil
     player.position = pos or v3(0, 0, 0)
     player.rotation = rotZ(yaw or 0)
     player.vz = 0

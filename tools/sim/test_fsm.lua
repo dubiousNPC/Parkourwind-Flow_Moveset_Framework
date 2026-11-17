@@ -177,10 +177,22 @@ M.step()
 M.SkillCheck.botch()
 M.anim.played = {}
 M.run(0.1)
-check("pwfalling played while botched in the air", count(M.anim.played, "pwfalling") == 1, table.concat(M.anim.played, ","))
+-- The Falling pose draws from the manifest's measured `air` pool.
+local AIR = {}
+for _, c in ipairs(require('scripts/Flow/core/fall_clips')) do if c.role == "air" then AIR[c.group] = true end end
+local airPlayed = 0
+for _, g in ipairs(M.anim.played) do if AIR[g] then airPlayed = airPlayed + 1 end end
+check("a measured air clip played while botched in the air", airPlayed == 1, table.concat(M.anim.played, ","))
 for _ = 1, 300 do M.step(); if M.state() ~= "Airborne" then break end end
 check("botch lands as Stumble", M.state() == "Stumble", M.state())
-M.run(1.2)
+-- The pose showed for the whole drop (> 0.6 s), so this lands "fallen": a
+-- measured recover clip (pwfall2up 3.0 s or pwfall3up 1.67 s), held for its length.
+local RECOVER = {}
+for _, c in ipairs(require('scripts/Flow/core/fall_clips')) do if c.role == "recover" then RECOVER[c.group] = c.dur end end
+local recoverDur = nil
+for _, g in ipairs(M.anim.played) do if RECOVER[g] then recoverDur = RECOVER[g] end end
+check("long botched fall lands on a recover clip", recoverDur ~= nil, table.concat(M.anim.played, ","))
+M.run((recoverDur or 1.0) + 0.2)
 check("stumble releases to Idle", M.state() == "Idle" and not M.override.movement)
 
 -------------------------------------------------------------------------------
