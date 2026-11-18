@@ -1,0 +1,12 @@
+blending_rules:
+  # Shapes the way INTO this clip only. Needs "smooth animation transitions".
+  # 101df, the skydive landing that is made: it starts crouched on its side
+  # (38 deg), not face down like the skydive (86 deg), so the blend is longer.
+  - from: "*"
+    to: "pwfall101df"
+    easing: "sineOut"
+    duration: 0.25
+  - from: "skydive*"
+    to: "pwfall101df"
+    easing: "sineOut"
+    duration: 0.30

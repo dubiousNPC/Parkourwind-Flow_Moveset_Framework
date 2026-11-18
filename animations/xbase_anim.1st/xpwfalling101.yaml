@@ -1,0 +1,17 @@
+blending_rules:
+  # Shapes the way INTO these clips only. Needs "smooth animation transitions".
+  # Skydive landings, set 101: 101a/b/c/ds start face down at 92 deg, the
+  # skydive posture (86 deg, face down), so a skydive lands on a short blend.
+  - from: "*"
+    to: "pwfall101*"
+    easing: "sineOut"
+    duration: 0.25
+  - from: "skydive*"
+    to: "pwfall101*"
+    easing: "sineOut"
+    duration: 0.12
+  # 101a/b/c/ds end face down at 91 deg; 101up starts face down at 83 deg.
+  - from: "pwfall101*"
+    to: "pwfall101up"
+    easing: "sineInOut"
+    duration: 0.15
