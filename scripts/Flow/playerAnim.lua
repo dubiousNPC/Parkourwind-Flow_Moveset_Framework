@@ -104,9 +104,10 @@ local GROUPS = {
     -- "fallen" after a botched fall that showed the Falling pose
     Stumble   = {
         -- the variants are only the fallback when no sequence could be planned
-        variants = { stumble = "pwfall1c", knockdown = "pwfall1b", fallen = "pwfall1up" },
-        seqVariants = { stumble = true, knockdown = true, fallen = true },
-        variantPriority = { stumble = PRIORITY_SCRIPTED, knockdown = PRIORITY_SCRIPTED, fallen = PRIORITY_SCRIPTED },
+        variants = { stumble = "pwfall1c", knockdown = "pwfall1b", fallen = "pwfall1up", falldown = "pwfall1c" },
+        seqVariants = { stumble = true, knockdown = true, fallen = true, falldown = true },
+        variantPriority = { stumble = PRIORITY_SCRIPTED, knockdown = PRIORITY_SCRIPTED, fallen = PRIORITY_SCRIPTED,
+                            falldown = PRIORITY_SCRIPTED },
         speed = 1,
         priority = PRIORITY_FLOW_MAJOR,
         blendMask = animation.BLEND_MASK.All,
@@ -142,12 +143,14 @@ end
 function Anim.planLanding(kind, landing)
     refreshFallContext()
     landing = landing or { outcome = "fail" }
-    local airDir = (kind ~= "knockdown") and FallPlan.dirOf(lastPicked) or nil
+    -- a botch landing continues the direction of the air clip that showed
+    local airDir = (kind == "stumble" or kind == "fallen") and FallPlan.dirOf(lastPicked) or nil
     lastPicked = nil
     local groups = FallPlan.landing(landing.outcome, {
         bearing = fallCtx.bearing,
         highSkill = landing.highSkill,
         fallen = (kind == "fallen"),
+        skydive = (kind == "knockdown"),
         dir = airDir,
     }, Anim.groupExists)
     if #groups == 0 then fallSeq = nil; return nil end
@@ -161,10 +164,13 @@ function Anim.planLanding(kind, landing)
     return total / (GROUPS.Stumble.speed or 1)
 end
 
+-- What a landing would play, without starting it (Airborne asks first, so a
+-- clean ordinary landing never enters Stumble at all).
 function Anim.landingGroups(kind, landing)
     refreshFallContext()
     return FallPlan.landing(landing.outcome, { bearing = fallCtx.bearing,
-        highSkill = landing.highSkill, fallen = (kind == "fallen") }, Anim.groupExists)
+        highSkill = landing.highSkill, fallen = (kind == "fallen"),
+        skydive = (kind == "knockdown") }, Anim.groupExists)
 end
 
 local pendingVariant = nil

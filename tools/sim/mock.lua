@@ -180,6 +180,8 @@ pre['openmw.core'] = function() return {
         M.events[#M.events + 1] = name
     end,
     magic = { EFFECT_TYPE = setmetatable({}, { __index = function(_, k) return k end }) },
+    -- Morrowind.esm values for what FLOW reads
+    getGMST = function(k) return ({ fFallDamageDistanceMin = 400 })[k] end,
 } end
 M.settings = {}
 local subscribers = {}
@@ -265,10 +267,10 @@ end
 pre['openmw.types'] = function() return {
     Actor = {
         isOnGround = function() return grounded() end,
-        canMove = function() return true end,
+        canMove = function() return not M.knockedDown end,
         isDead = function() return false end,
         isSwimming = function() return swimming() end,
-        getEncumbrance = function() return 0 end,
+        getEncumbrance = function() return M.encumbrance or 0 end,
         getCapacity = function() return 100 end,
         activeEffects = activeEffects,
         stats = {

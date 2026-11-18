@@ -12,6 +12,7 @@ local function seqs(t) return table.concat(t, ",") end
 local all = function() return true end
 local known = {}
 for _, c in ipairs(clips) do known[c.group] = true end
+local real = function(g) return known[g] == true end   -- the measured skeleton
 
 print("[1] direction and side from the travel bearing")
 local cases = {
@@ -47,23 +48,62 @@ check("clean: the 3df handspring", seqs(Plan.landing("clean", { highSkill = true
 check("close forward right: the 3a tumble", seqs(Plan.landing("close", { highSkill = true, bearing = 50 }, all)) == "pwfall3a")
 check("close left: 3b", seqs(Plan.landing("close", { highSkill = true, bearing = -50 }, all)) == "pwfall3b")
 check("close straight: 3c", seqs(Plan.landing("close", { highSkill = true }, all)) == "pwfall3c")
+check("close BACKWARD: the 3bkup back tumble", seqs(Plan.landing("close", { highSkill = true, bearing = 180 }, real)) == "pwfall3bkup")
+check("close back-right: still 3bkup (one back tumble)", seqs(Plan.landing("close", { highSkill = true, bearing = 130 }, real)) == "pwfall3bkup")
+check("close back after a backward air clip: 3bkup", seqs(Plan.landing("close", { highSkill = true, bearing = 0, dir = "back" }, real)) == "pwfall3bkup")
+check("a group renamed pwfall3bk is taken first", seqs(Plan.landing("close", { highSkill = true, bearing = 180 }, all)) == "pwfall3bk")
+local noBk = function(g) return real(g) and g ~= "pwfall3bkup" end
+check("no back tumble on this skeleton (female, 1st person): 3c", seqs(Plan.landing("close", { highSkill = true, bearing = 180 }, noBk)) == "pwfall3c")
+check("clean backward: still the 3df display", seqs(Plan.landing("clean", { highSkill = true, bearing = 180 }, real)) == "pwfall3df")
 check("failed: 3es then 1up (3up stays reserved)", seqs(Plan.landing("fail", { highSkill = true }, all)) == "pwfall3es,pwfall1up")
 check("severe: also 3es then 1up", seqs(Plan.landing("severe", { highSkill = true, bearing = 170 }, all)) == "pwfall3es,pwfall1up")
 local used = {}
 for _, o in ipairs({ "clean", "close", "fail", "severe" }) do
     for _, h in ipairs({ true, false }) do for _, b in ipairs({ 0, 60, -60, 180, 130, -130 }) do
         for _, f in ipairs({ true, false }) do
-            for _, g in ipairs(Plan.landing(o, { highSkill = h, bearing = b, fallen = f }, all)) do used[g] = true end
+            for _, g in ipairs(Plan.landing(o, { highSkill = h, bearing = b, fallen = f }, real)) do used[g] = true end
         end
     end end
 end
 check("pwfall3up and pwfall2up are never played", not used.pwfall3up and not used.pwfall2up)
+check("pwfall3bkup is reachable", used.pwfall3bkup == true)
 local missing = {}
 for g in pairs(used) do if not known[g] then missing[#missing + 1] = g end end
 check("every group the plan uses is in the measured manifest", #missing == 0, table.concat(missing, ","))
 
 check("after a backward air clip, a fail lands backward", seqs(Plan.landing("severe", { bearing = 10, dir = "back" }, all)) == "pwfall2ds,pwfall1up")
 check("dirOf: 2c is back, 1a is fwd, 3df is neither", Plan.dirOf("pwfall2c") == "back" and Plan.dirOf("pwfall1a") == "fwd" and Plan.dirOf("pwfall3df") == nil)
+
+print("[4b] skydive landings: set 101, never set 3")
+local sky = function(o, b, h, has) return seqs(Plan.landing(o, { skydive = true, bearing = b, highSkill = h }, has or real)) end
+check("made (clean), ordinary skill: 101df", sky("clean", nil, false) == "pwfall101df")
+check("made (close), high skill: still 101df, no 3x tumble", sky("close", 50, true) == "pwfall101df")
+check("clean at high skill: 101df, not the 3df display", sky("clean", nil, true) == "pwfall101df")
+check("fail straight: 101c then 101up", sky("fail", nil, false) == "pwfall101c,pwfall101up")
+check("fail drifting right: 101a then 101up", sky("fail", 60, false) == "pwfall101a,pwfall101up")
+check("fail drifting left: 101b then 101up", sky("fail", -60, false) == "pwfall101b,pwfall101up")
+check("fail at high skill: 101, not 3es", sky("fail", nil, true) == "pwfall101c,pwfall101up")
+check("severe: 101ds then 101up", sky("severe", nil, false) == "pwfall101ds,pwfall101up")
+local beast = function(g) return real(g) and g ~= "pwfall101ds" or g == "pwfall101es" end
+check("severe on the beast set (keyed 101es)", sky("severe", nil, false, beast) == "pwfall101es,pwfall101up")
+local no101 = function(g) return real(g) and not g:find("^pwfall101") end
+check("no set 101 (female / 1st person), made: a plain landing", sky("clean", nil, true, no101) == "")
+check("no set 101, fail: set 1 then 1up", sky("fail", 60, false, no101) == "pwfall1a,pwfall1up")
+check("no set 101, severe at high skill: 1ds then 1up, still no set 3", sky("severe", nil, true, no101) == "pwfall1ds,pwfall1up")
+local skyUsed = {}
+for _, o in ipairs({ "clean", "close", "fail", "severe" }) do for _, h in ipairs({ true, false }) do
+    for _, b in ipairs({ 0, 60, -60, 180 }) do for _, hs in ipairs({ real, no101 }) do
+        for _, g in ipairs(Plan.landing(o, { skydive = true, highSkill = h, bearing = b }, hs)) do skyUsed[g] = true end
+    end end
+end end
+local any3 = false
+for g in pairs(skyUsed) do if g:find("^pwfall3") then any3 = true end end
+check("no skydive outcome, on any skeleton, reaches set 3", not any3)
+check("manoeuvres never reach set 101", (function()
+    for _, o in ipairs({ "clean", "close", "fail", "severe" }) do for _, h in ipairs({ true, false }) do
+        for _, g in ipairs(Plan.landing(o, { highSkill = h, bearing = 0 }, real)) do if g:find("101") then return false end end
+    end end
+    return true end)())
 
 print("[5] the skeleton rail")
 local no3df = function(g) return g ~= "pwfall3df" end

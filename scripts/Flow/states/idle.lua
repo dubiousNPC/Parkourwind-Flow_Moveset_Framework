@@ -3,6 +3,8 @@ local BaseState = require('scripts/Flow/states/base_state')
 local SkillCheck = require('scripts/Flow/core/skill_check')
 local StateManager = require('scripts/Flow/core/state_manager')
 local Surface = require('scripts/Flow/core/surface')
+local LandingWatch = require('scripts/Flow/core/landing_watch')
+local FallPlan = require('scripts/Flow/core/fall_plan')
 
 local IdleState = BaseState.new("Idle", { sensors = { forward = true } })
 
@@ -17,6 +19,14 @@ function IdleState:enter()
 end
 
 function IdleState:update(dt, syncData, inputData)
+    -- the engine knocked the player down for the fall just landed: play the
+    -- stumble set over its knockdown. It is a failed landing; the check grades it.
+    local impact = LandingWatch.knockdown()
+    if impact then
+        local margin, high = SkillCheck.fallCheck(impact, FallPlan.roll())
+        return "Stumble", { kind = "falldown",
+            landing = { outcome = FallPlan.outcome(math.min(margin, -1)), highSkill = high } }
+    end
     if Surface.inWater() then return "Underwater" end
     if not syncData.isGrounded then
         return "Airborne"

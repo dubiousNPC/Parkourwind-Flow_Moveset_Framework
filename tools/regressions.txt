@@ -320,7 +320,7 @@ needs: not-present startDive
 
 file: scripts/Flow/states/stumble.lua
 why: two presentations, one state. "knockdown" is the skydive landing and plays at Scripted priority over whatever the engine is doing; "stumble" is the botched manoeuvre. There is NO Lua setter for an engine knockdown - canMove() only reads one - so the controls are held for the clip instead.
-needs: DURATION = { stumble = 1.00, knockdown = 1.50, fallen = 1.50 }
+needs: DURATION = { stumble = 1.00, knockdown = 1.50, fallen = 1.50, falldown = 1.50 }
 needs: Anim.planLanding(kind, payload and payload.landing)
 needs: types.Actor.canMove
 
@@ -555,3 +555,43 @@ why: a skydive landing is decided by the landing check, not forced into a knockd
 needs: SkillCheck.fallCheck(impact, FallPlan.roll())
 needs: FallPlan.outcome(math.min(margin, -1))
 needs: #Anim.landingGroups("knockdown", landing) == 0
+
+file: scripts/Flow/core/fall_plan.lua
+why: a backward fall at high skill on a close check plays the authored backward tumble (pwfall3bkup, added 2026-11-17), not a forward 3a-c roll. Skeletons without it (female, first person) fall back to 3c.
+needs: back = { "pwfall3bk", "pwfall3bkup" }
+needs: local tumble = (dir == "back") and Plan.ACRO.back or Plan.ACRO[side]
+
+file: scripts/Flow/core/fall_plan.lua
+why: a released skydive lands on set 101 (2026-11-18): 101df when made, a 101 impact then 101up when failed. Set 3 is too acrobatic for it and never follows a skydive, whatever the skill; skeletons without set 101 land it on set 1.
+needs: landed = "pwfall101df", recover = "pwfall101up"
+needs: severe = { "pwfall101ds", "pwfall101es" }
+needs: if ctx.skydive then
+
+file: scripts/Flow/playerAnim.lua
+why: the skydive landing ("knockdown" Stumble) is planned with the skydive flag, which selects set 101 in core/fall_plan.lua.
+needs: skydive = (kind == "knockdown")
+
+file: scripts/Flow/core/landing_watch.lua
+why: the engine's fall-damage knockdown (healthLost > Acrobatics x fatigue term, character.cpp) is played as the stumble set. FLOW cannot read the KnockedDown flag; canMove() false inside a short window after an ordinary landing is that knockdown.
+needs: Watch.WINDOW = 0.5
+needs: if types.Actor.canMove(mwSelf) then return nil end
+
+file: scripts/Flow/states/idle.lua
+why: the knockdown watch is asked first in Idle, before anything can start a move from a body the engine has just knocked down.
+needs: local impact = LandingWatch.knockdown()
+needs: return "Stumble", { kind = "falldown",
+
+file: scripts/Flow/states/airborne.lua
+why: only an ORDINARY landing arms the watch (a skydive and a botch already land in Stumble), and a new jump clears it.
+needs: LandingWatch.arm(impact, peakZ - mwSelf.position.z)
+needs: LandingWatch.clear()
+
+file: scripts/Flow/core/landing_watch.lua
+why: canMove() is only "max speed > 0": over-encumbered and paralysed read the same as knocked down. Without these guards an over-encumbered player played a fall on every landing; a knockdown after a drop shorter than the engine's damage height is not the fall's.
+needs: local MIN_HEIGHT = core.getGMST("fFallDamageDistanceMin") or 400
+needs: if (fallHeight or 0) < MIN_HEIGHT then armedAt = nil; return end
+needs: if otherReason() then return nil end
+
+file: scripts/Flow/states/stumble.lua
+why: a planned landing shorter than the engine's knockdown (101df 1.67 s vs 2.6 s) handed back while the engine still held the player down, and the vanilla knockdown showed for about a second. Stumble now holds its last pose until canMove() returns, within a cap.
+needs: if not planned or types.Actor.canMove(mwSelf) or timeInState >= duration + ENGINE_HOLD_MAX then

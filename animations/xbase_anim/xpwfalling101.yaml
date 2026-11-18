@@ -1,17 +1,17 @@
 blending_rules:
   # Shapes the way INTO these clips only. Needs "smooth animation transitions".
-  # Landings, set 3: every clip starts lying face down at 96 deg, the skydive
-  # posture (86 deg, face down), so a skydive lands on a short blend.
+  # Skydive landings, set 101: 101a/b/c/ds start face down at 92 deg, the
+  # skydive posture (86 deg, face down), so a skydive lands on a short blend.
   - from: "*"
-    to: "pwfall3*"
+    to: "pwfall101*"
     easing: "sineOut"
     duration: 0.25
   - from: "skydive*"
-    to: "pwfall3*"
+    to: "pwfall101*"
     easing: "sineOut"
     duration: 0.12
-  # 3es ends exactly where 3up begins (measured gap 0): a cut, not a blend.
-  - from: "pwfall3es: *"
-    to: "pwfall3up: *"
-    easing: "linear"
-    duration: 0.05
+  # 101a/b/c/ds end face down at 91 deg; 101up starts face down at 83 deg.
+  - from: "pwfall101*"
+    to: "pwfall101up"
+    easing: "sineInOut"
+    duration: 0.15

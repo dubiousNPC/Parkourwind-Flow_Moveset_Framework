@@ -18,6 +18,7 @@ local StateManager = require('scripts/Flow/core/state_manager')
 local Anim = require('scripts/Flow/playerAnim')
 local FallPick = require('scripts/Flow/core/fall_pick')
 local FallPlan = require('scripts/Flow/core/fall_plan')
+local LandingWatch = require('scripts/Flow/core/landing_watch')
 local Surface = require('scripts/Flow/core/surface')
 
 local AirborneState = BaseState.new("Airborne", { sensors = { forward = true, ledge = true } })
@@ -37,6 +38,7 @@ local HEAVY_FALL_SPEED = 900.0   -- u/s down: the air pool narrows to the big tu
 local FALLEN_POSE_TIME = 0.6     -- a botch that showed the Falling pose this long lands as "fallen"
 local fallVz = 0                 -- peak downward speed while off the ground
 local fallVx, fallVy = 0, 0      -- horizontal velocity, world axes
+local peakZ = 0                  -- highest point of this fall, for the fall's height
 
 -- Asked by playerAnim at pick time only.
 local function fallContext()
@@ -105,6 +107,8 @@ function AirborneState.getRollDebug()
 end
 
 function AirborneState:enter()
+    LandingWatch.clear()   -- a new jump: the last landing's window is over
+    peakZ = mwSelf.position.z
     isActive = true
     armed = false
     timeAirborne = 0
@@ -140,6 +144,7 @@ function AirborneState:update(dt, syncData, inputData)
     if not syncData.isGrounded then
         fallVx, fallVy = syncData.velocityX or 0, syncData.velocityY or 0
     end
+    if mwSelf.position.z > peakZ then peakZ = mwSelf.position.z end
     local vz = syncData.verticalVelocity
     if not syncData.isGrounded and vz and vz < fallVz then fallVz = vz end
 
@@ -217,6 +222,9 @@ function AirborneState:update(dt, syncData, inputData)
         return "Stumble", { kind = kind, landing = landing }
     end
 
+    -- an ordinary landing: the engine may still knock the player down for the
+    -- fall's damage; Idle watches for it (core/landing_watch.lua)
+    LandingWatch.arm(impact, peakZ - mwSelf.position.z)
     if armed then
         armed = false
         rollHandoff = true

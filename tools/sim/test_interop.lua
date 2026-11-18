@@ -252,10 +252,9 @@ end
 check("off a tower: Skydive arms near 1.2 s", armedAt and armedAt >= 1.2 and armedAt < 1.5, armedAt)
 check("released after the windup", releasedAt and armedAt and releasedAt - armedAt >= 2.9, releasedAt)
 check("released: Acrobatics +250 and Jump +150", buffed)
--- The skydive landing is decided by the landing check (core/fall_plan.lua):
--- this character (Acrobatics 30) is not high-skill, so it is either an
--- ordinary landing (no Stumble) or a fall clip then pwfall1up. The controls are
--- held for exactly the planned clips' length.
+-- The skydive landing is set 101 (2026-11-18), by the landing check: a made
+-- landing is pwfall101df; a failed one a 101 impact then pwfall101up. Never
+-- set 3. The controls are held for exactly the planned clips' length.
 local held = 0
 for _, st in ipairs(states) do if st == "Stumble" then held = held + 1 end end
 local clipsByGroup = {}
@@ -264,14 +263,87 @@ local planned, want = {}, 0
 for _, g in ipairs(M.anim.played) do
     if g:find("^pwfall") and clipsByGroup[g] then planned[#planned + 1] = g; want = want + clipsByGroup[g].dur end
 end
-local okHold = (held == 0 and #planned == 0)
-    or (#planned == 2 and planned[2] == "pwfall1up" and math.abs(held / 60 - want) <= 0.1)
-check("lands by the check: a fall clip then pwfall1up, held for their length", okHold,
-    string.format("%.2f s for %s (%.2f)", held / 60, table.concat(planned, ","), want))
+local okSeq = (#planned == 1 and planned[1] == "pwfall101df")
+    or (#planned == 2 and planned[1]:find("^pwfall101") ~= nil and planned[2] == "pwfall101up")
+check("skydive lands on set 101 (101df, or a 101 impact then 101up)", okSeq, table.concat(planned, ","))
+check("...held for the planned clips' length", math.abs(held / 60 - want) <= 0.1,
+    string.format("%.2f s vs %.2f", held / 60, want))
+local set3 = false
+for _, g in ipairs(planned) do if g:find("^pwfall3") then set3 = true end end
+check("a skydive never lands on set 3", not set3, table.concat(planned, ","))
 check("never pwfall3up (reserved)", not has(M.anim.played, "pwfall3up"))
 check("buffs gone after the landing", M.stats.acrobatics.modifier == 0 and M.effects.Jump == nil,
     M.stats.acrobatics.modifier)
 settle()
+
+-------------------------------------------------------------------------------
+print("[9] the engine's fall-damage knockdown after an ordinary landing")
+-- core/landing_watch.lua: Airborne arms it on an ordinary landing; Idle turns a
+-- knockdown inside the window into Stumble "falldown" (the stumble set).
+M.reset(v3(0, 0, 0), 0)
+M.box("ledge", -100, -100, 1100, 100, 100, 1200)
+M.player.position = v3(0, 0, 1200)
+M.run(0.2)
+M.anim.played = {}
+M.player.position = v3(0, 160, 1200); M.player.vz = 0
+local fdStates, fdKnocked = {}, false
+for i = 1, 600 do
+    M.step()
+    if not fdKnocked and M.grounded() and M.state() ~= "Airborne" then
+        M.knockedDown = true; fdKnocked = i      -- the engine's verdict on the landing frame
+    end
+    if fdKnocked and i - fdKnocked == 60 then M.knockedDown = false end   -- its clip ends
+    if fdStates[#fdStates] ~= M.state() then fdStates[#fdStates + 1] = M.state() end
+    if fdKnocked and i - fdKnocked > 30 and M.state() == "Idle" then break end
+end
+local fd = {}
+for _, g in ipairs(M.anim.played) do if g:find("^pwfall") then fd[#fd + 1] = g end end
+check("a knocked-down ordinary landing goes to Stumble", has(fdStates, "Stumble"), table.concat(fdStates, ">"))
+check("...and plays the stumble set: a fall clip then pwfall1up (never set 101)",
+    #fd >= 2 and fd[#fd] == "pwfall1up" and not table.concat(fd, ","):find("101"), table.concat(fd, ","))
+M.knockedDown = false
+settle()
+
+-- no knockdown: an ordinary landing stays ordinary
+M.reset(v3(0, 0, 0), 0)
+M.box("ledge", -100, -100, 1100, 100, 100, 1200)
+M.player.position = v3(0, 0, 1200)
+M.run(0.2)
+M.anim.played = {}
+M.player.position = v3(0, 160, 1200); M.player.vz = 0
+local plain = {}
+for _ = 1, 300 do M.step(); if plain[#plain] ~= M.state() then plain[#plain + 1] = M.state() end end
+check("no knockdown: no Stumble, no fall clip", not has(plain, "Stumble") and not has(M.anim.played, "pwfall1up"),
+    table.concat(plain, ">"))
+-- a knockdown well after the landing is not the fall's
+M.knockedDown = true; M.run(0.3)
+check("a knockdown after the window is left to the engine", M.state() ~= "Stumble", M.state())
+M.knockedDown = false
+settle()
+
+-- guards: no fall knockdown below the engine's damage height, and canMove()
+-- false for another reason (over-encumbered) is not one either
+local function dropWith(height, setup)
+    M.reset(v3(0, 0, 0), 0)
+    M.box("ledge", -100, -100, height - 100, 100, 100, height)
+    M.player.position = v3(0, 0, height)
+    M.run(0.2)
+    M.anim.played = {}
+    M.player.position = v3(0, 160, height); M.player.vz = 0
+    local sts, hit = {}, false
+    for _ = 1, 400 do
+        M.step()
+        if not hit and M.grounded() and M.state() ~= "Airborne" then hit = true; setup() end
+        if sts[#sts] ~= M.state() then sts[#sts + 1] = M.state() end
+    end
+    M.knockedDown = false; M.encumbrance = nil
+    settle()
+    return sts
+end
+local short = dropWith(300, function() M.knockedDown = true end)
+check("a knockdown after a 300-unit drop (under fFallDamageDistanceMin) is not the fall's", not has(short, "Stumble"), table.concat(short, ">"))
+local heavy = dropWith(1200, function() M.knockedDown = true; M.encumbrance = 150 end)
+check("over-encumbered (canMove false for that) is not a fall knockdown", not has(heavy, "Stumble"), table.concat(heavy, ">"))
 
 print(string.format("\n%d passed, %d failed", pass, fail))
 if fail > 0 then os.exit(1) end

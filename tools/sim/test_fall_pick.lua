@@ -35,9 +35,18 @@ check("no horizontal travel = nil", Pick.bearing(0, 0, 0, 1) == nil)
 print("[2] the manifest")
 local roles = {}
 for _, c in ipairs(clips) do roles[c.role] = (roles[c.role] or 0) + 1 end
-check("16 measured clips (pwfall1up keyed since 2026-11-17)", #clips == 16, #clips)
-check("8 air, 4 land, 1 landHard, 3 recover", roles.air == 8 and roles.land == 4 and roles.landHard == 1 and roles.recover == 3)
+check("23 measured clips (+ set 101, 2026-11-18)", #clips == 23, #clips)
+check("10 air, 4 land, 5 landHard, 4 recover", roles.air == 10 and roles.land == 4 and roles.landHard == 5 and roles.recover == 4,
+    string.format("%s %s %s %s", roles.air, roles.land, roles.landHard, roles.recover))
 
+-- The selection sections below exercise FallPick's measured picker, which no
+-- longer drives play (core/fall_plan.lua does); they keep it honest on the
+-- sets it was written for, 1-3. Set 101 is the skydive's, picked by the plan.
+do
+    local legacy = {}
+    for _, c in ipairs(clips) do if not c.group:find("^pwfall101") then legacy[#legacy + 1] = c end end
+    clips = legacy
+end
 print("[3] direction is honoured, the clip is not fixed")
 local seen, l = draws({ role = "air", bearing = 90 }, 40)
 check("travelling right -> pwfall1b (the right roll)", seen.pwfall1b and not seen.pwfall2a, l)
